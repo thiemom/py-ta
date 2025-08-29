@@ -49,6 +49,33 @@ $H(\omega)=S\,e^{-\,i\,\omega\,	au_0}\,\dfrac{\prod_{r}\left(1+i\,\omega\,z_rig
 
 ---
 
+## 3) Two‑Pathway (Lieuwen Decomposition)
+
+**Equation (Unicode/plain):**  
+`I(ω) = A_φ · G_φ(ω) − A_t · G_t(ω)`  
+where `G_i(ω) = exp(−i ω τ_i) · (1 + i ω θ_i)^(−k_i)`
+
+**Equation (LaTeX):**  
+$I(\omega) = A_\phi \, G_\phi(\omega) - A_t \, G_t(\omega)$  
+where $G_i(\omega) = e^{-i\omega\tau_i} \left(1 + i\omega\theta_i\right)^{-k_i}$
+
+**Meaning**
+- `A_φ` = equivalence ratio pathway amplitude (dimensionless)  
+- `A_t` = turbulence/velocity pathway amplitude (dimensionless)  
+- `G_φ(ω)`, `G_t(ω)` = Gamma‑distributed delay kernels for each pathway  
+- Positive ER pathway, negative turbulence pathway → interference patterns
+
+**Features**
+- Models flame response as superposition of two physical mechanisms.  
+- Captures complex interference, zero crossings, and phase jumps naturally.  
+- Each pathway has independent delay distribution parameters.
+
+**When to choose**
+- Complex FTF with interference patterns, magnitude nulls, or phase discontinuities.  
+- When physical insight into ER vs. turbulence contributions is desired.
+
+---
+
 ## Historical context (very brief)
 
 - **1950s:** Crocco & Cheng — system-theory view of combustion instability (zeros/poles).  
@@ -72,6 +99,11 @@ $H(\omega)=S\,e^{-\,i\,\omega\,	au_0}\,\dfrac{\prod_{r}\left(1+i\,\omega\,z_rig
 - Freitag, M. (2018). *System identification of distributed time delay models for flames*. PhD Thesis, TUM.  
 - Schuermans, B., Bellucci, V., Geigle, K., Paschereit, C.O. (2004). *Thermoacoustic modeling and control of a full‑scale gas turbine combustor*. **Combust. Sci. Tech.**  
 - Crocco, L. & Cheng, S.I. (1956). *Theory of combustion instability in liquid propellant rocket motors*. AGARD.
+
+**Two‑Pathway**
+- Lieuwen, T. (2012). *Unsteady Combustor Physics*. CUP. (Chapter on distributed delays and multi‑pathway decomposition)  
+- Schuller, T., Durox, D., Candel, S. (2003). *A unified model for the prediction of laminar flame transfer functions*. **Combust. Flame**  
+- Noiray, N. & Schuermans, B. (2013). *Deterministic quantities characterizing noise driven Hopf bifurcations in gas turbine combustors*. **Int. J. Non‑Linear Mech.**
 
 ---
 

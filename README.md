@@ -8,7 +8,7 @@ This repository contains standalone Python scripts useful for thermo-acoustics r
 
 ## Contents
 
-- **`py-ftf.py`** - DTL (Distributed Time Lag) Flame Transfer Function model implementation with parameter fitting capabilities
+- **`pyftf.py`** - DTL (Distributed Time Lag) Flame Transfer Function model implementation with parameter fitting capabilities
 - **`example_usage.py`** - Example demonstrating FTF model usage with synthetic data
 
 ## Usage

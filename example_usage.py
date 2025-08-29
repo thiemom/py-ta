@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Example usage of both DTL and ZPK-Fractional FTF models from pyftf
+Example usage of DTL, ZPK-Fractional, and Two-Pathway FTF models from pyftf
 """
 
 import numpy as np
@@ -64,6 +64,39 @@ def create_synthetic_zpk_data():
     
     mag = np.abs(H_true) * mag_noise
     phase = np.angle(H_true) + phase_noise
+    
+    return omega, mag, phase, true_params
+
+def create_synthetic_two_pathway_data():
+    """Create synthetic two-pathway FTF data with complex interference patterns"""
+    # Frequency range
+    omega = np.logspace(0, 3, 100)  # 1 to 1000 rad/s
+    
+    # True parameters for synthetic two-pathway data
+    # Pathway 1: equivalence ratio pathway (positive contribution)
+    # Pathway 2: turbulence/velocity pathway (negative contribution)
+    true_params = TwoPathParams(
+        A_phi=1.5,      # Equivalence ratio amplitude
+        A_t=1.2,        # Turbulence amplitude
+        tau_phi=0.002,  # ER pathway delay
+        tau_t=0.003,    # Turbulence pathway delay
+        theta_phi=0.008, # ER time constant
+        theta_t=0.015,   # Turbulence time constant
+        k_phi=1.0,      # ER shape parameter
+        k_t=1.3         # Turbulence shape parameter
+    )
+    
+    # Generate synthetic FTF using interaction index formulation
+    I_true = I_two_path(omega, true_params)
+    
+    # Add some noise
+    np.random.seed(456)
+    noise_level = 0.04
+    mag_noise = 1 + noise_level * np.random.randn(len(omega))
+    phase_noise = noise_level * np.random.randn(len(omega))
+    
+    mag = np.abs(I_true) * mag_noise
+    phase = np.angle(I_true) + phase_noise
     
     return omega, mag, phase, true_params
 
@@ -166,6 +199,59 @@ def run_zpk_example():
     
     return p_hat, info
 
+def run_two_pathway_example():
+    """Run Two-Pathway FTF model example"""
+    print("\n\nTwo-Pathway FTF Model Example")
+    print("=" * 40)
+    
+    # Create synthetic data
+    omega, mag, phase, true_params = create_synthetic_two_pathway_data()
+    
+    print(f"Generated {len(omega)} frequency points")
+    print(f"Frequency range: {omega[0]/(2*np.pi):.2f} to {omega[-1]/(2*np.pi):.2f} Hz")
+    
+    # Fit the Two-Pathway model (direct I fitting, not normalized)
+    print("\nFitting Two-Pathway model...")
+    p_hat, info = fit_ftf_two_path(
+        omega, mag, phase,
+        phase_in_degrees=False,
+        normalize=False,  # Fitting interaction index directly
+        w_mag=1.0,
+        w_phase=1.0,
+        robust="soft_l1",
+        f_scale=1.0
+    )
+    
+    # Print results
+    print(f"\nTwo-Pathway Fit Results:")
+    print(f"Success: {info['success']}")
+    print(f"Cost: {info['cost']:.6f}")
+    print(f"Function evaluations: {info['nfev']}")
+    print(f"Log-magnitude RMSE: {info['logmag_rmse']:.6f}")
+    print(f"Phase RMSE [rad]: {info['phase_rmse_rad']:.6f}")
+    
+    print(f"\nFitted Parameters:")
+    print(f"A_phi (ER amplitude): {p_hat.A_phi:.4f} (true: {true_params.A_phi:.4f})")
+    print(f"A_t (turb amplitude): {p_hat.A_t:.4f} (true: {true_params.A_t:.4f})")
+    print(f"tau_phi [s]: {p_hat.tau_phi:.6f} (true: {true_params.tau_phi:.6f})")
+    print(f"tau_t [s]: {p_hat.tau_t:.6f} (true: {true_params.tau_t:.6f})")
+    print(f"theta_phi [s]: {p_hat.theta_phi:.6f} (true: {true_params.theta_phi:.6f})")
+    print(f"theta_t [s]: {p_hat.theta_t:.6f} (true: {true_params.theta_t:.6f})")
+    print(f"k_phi [-]: {p_hat.k_phi:.4f} (true: {true_params.k_phi:.4f})")
+    print(f"k_t [-]: {p_hat.k_t:.4f} (true: {true_params.k_t:.4f})")
+    
+    # Create plot
+    fig = plot_two_path(omega, mag, phase, p_hat,
+                       phase_in_degrees=False,
+                       normalize=False,  # Direct I plotting
+                       title="Two-Pathway FTF Model Fit Example")
+    
+    # Save plot
+    plt.savefig('two_pathway_ftf_fit_example.png', dpi=150, bbox_inches='tight')
+    print(f"\nPlot saved as 'two_pathway_ftf_fit_example.png'")
+    
+    return p_hat, info
+
 def test_rising_falling_behavior():
     """Test both models on rising-then-falling magnitude data"""
     print("\n\nTesting Rising-Then-Falling Magnitude Behavior")
@@ -260,13 +346,14 @@ def test_rising_falling_behavior():
     return dtl_params, dtl_info, zpk_params, zpk_info
 
 def main():
-    """Main example function - runs both DTL and ZPK examples"""
-    print("FTF Model Examples - DTL and ZPK-Fractional")
-    print("=" * 50)
+    """Main example function - runs DTL, ZPK, and Two-Pathway examples"""
+    print("FTF Model Examples - DTL, ZPK-Fractional, and Two-Pathway")
+    print("=" * 60)
     
     # Run standard examples
     dtl_params, dtl_info = run_dtl_example()
     zpk_params, zpk_info = run_zpk_example()
+    two_pathway_params, two_pathway_info = run_two_pathway_example()
     
     # Test rising-falling behavior
     dtl_rf_params, dtl_rf_info, zpk_rf_params, zpk_rf_info = test_rising_falling_behavior()
@@ -277,6 +364,7 @@ def main():
     print("Standard synthetic data:")
     print(f"  DTL Model - Success: {dtl_info['success']}, Cost: {dtl_info['cost']:.6f}")
     print(f"  ZPK Model - Success: {zpk_info['success']}, Cost: {zpk_info['cost']:.6f}")
+    print(f"  Two-Pathway Model - Success: {two_pathway_info['success']}, Cost: {two_pathway_info['cost']:.6f}")
     print("\nRising-then-falling data:")
     print(f"  DTL Model - Success: {dtl_rf_info['success']}, Cost: {dtl_rf_info['cost']:.6f}")
     print(f"  ZPK Model - Success: {zpk_rf_info['success']}, Cost: {zpk_rf_info['cost']:.6f}")

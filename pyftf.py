@@ -5,6 +5,14 @@ from dataclasses import dataclass
 from typing import Dict, Sequence, Tuple
 from scipy.optimize import least_squares
 
+import numpy as np
+from dataclasses import dataclass
+from typing import Dict, Tuple
+from scipy.optimize import least_squares
+import matplotlib.pyplot as plt
+
+
+
 # -------------------- DTL FTF model --------------------
 # Polifke, W. (2020). System identification of combustion dynamics by means of CFD/LES: FTF, FDF and DTL. Progress in Energy and Combustion Science 79: 100845.
 # Comprehensive review of flame transfer function identification; shows why single delays fail, and how Gamma/Gaussian distributed delays reproduce measured gain/phase.
@@ -351,23 +359,13 @@ def H_zpk_frac(omega: np.ndarray, p: ZPKFrac) -> np.ndarray:
         H /= (1.0 + 1j * omega * pr) ** (kr)
     return H
 
-# ---------------- Utilities ----------------
-def unwrap_phase(phi, deg=False):
-    """Unwrap phase (duplicate function - use main version above)."""
-    phi = np.asarray(phi, float)
-    if deg: phi = np.deg2rad(phi)
-    return np.unwrap(phi)
-
-def wrap_pi(x):
-    """Wrap phase to (-π, π] (duplicate function - use wrap_to_pi above)."""
-    return (x + np.pi) % (2*np.pi) - np.pi
-
-def softplus(x):
-    """Softplus activation: log(1 + exp(x)). Maps R → R⁺."""
+# ---------------- Utilities (ZPK-specific) ----------------
+def softplus_zpk(x):
+    """Softplus activation for ZPK model: log(1 + exp(x)). Maps R → R⁺."""
     return np.log1p(np.exp(x))
 
-def inv_softplus(y):
-    """Inverse softplus for y > 0. Maps R⁺ → R.
+def inv_softplus_zpk(y):
+    """Inverse softplus for ZPK model for y > 0. Maps R⁺ → R.
     
     Args:
         y: Positive values
@@ -378,31 +376,31 @@ def inv_softplus(y):
     y = np.asarray(y, dtype=float)
     return np.log(np.expm1(np.maximum(y, 1e-12)))
 
-def pack_uncon(params: ZPKFrac) -> np.ndarray:
+def pack_uncon_zpk(params: ZPKFrac) -> np.ndarray:
     """
     Flatten to a 1-D unconstrained vector in this order:
     [log S, inv_sp(tau0), inv_sp(z[0..R-1]), inv_sp(a[0..R-1]),
      inv_sp(p[0..J-1]), inv_sp(k[0..J-1])]
     """
-    v = [float(np.log(params.S)), float(inv_softplus(params.tau0))]
-    v.extend(inv_softplus(np.asarray(params.z, dtype=float)).ravel().tolist())
-    v.extend(inv_softplus(np.asarray(params.a, dtype=float)).ravel().tolist())
-    v.extend(inv_softplus(np.asarray(params.p, dtype=float)).ravel().tolist())
-    v.extend(inv_softplus(np.asarray(params.k, dtype=float)).ravel().tolist())
+    v = [float(np.log(params.S)), float(inv_softplus_zpk(params.tau0))]
+    v.extend(inv_softplus_zpk(np.asarray(params.z, dtype=float)).ravel().tolist())
+    v.extend(inv_softplus_zpk(np.asarray(params.a, dtype=float)).ravel().tolist())
+    v.extend(inv_softplus_zpk(np.asarray(params.p, dtype=float)).ravel().tolist())
+    v.extend(inv_softplus_zpk(np.asarray(params.k, dtype=float)).ravel().tolist())
     return np.array(v, dtype=float)
 
-def unpack_uncon(v: np.ndarray, R: int, J: int) -> ZPKFrac:
+def unpack_uncon_zpk(v: np.ndarray, R: int, J: int) -> ZPKFrac:
     """
-    Inverse of pack_uncon. Enforces positivity via softplus.
+    Inverse of pack_uncon_zpk. Enforces positivity via softplus.
     """
     v = np.asarray(v, dtype=float).ravel()
     i = 0
     S    = np.exp(v[i]); i += 1
-    tau0 = softplus(v[i]); i += 1
-    z = softplus(v[i:i+R]); i += R
-    a = softplus(v[i:i+R]); i += R
-    p = softplus(v[i:i+J]); i += J
-    k = softplus(v[i:i+J]); i += J
+    tau0 = softplus_zpk(v[i]); i += 1
+    z = softplus_zpk(v[i:i+R]); i += R
+    a = softplus_zpk(v[i:i+R]); i += R
+    p = softplus_zpk(v[i:i+J]); i += J
+    k = softplus_zpk(v[i:i+J]); i += J
     return ZPKFrac(S=float(S), tau0=float(tau0), z=z, a=a, p=p, k=k)
 
 # ---------------- Heuristics ----------------
@@ -442,7 +440,7 @@ def init_zpk_frac(omega, mag, phase_unw, R: int, J: int) -> ZPKFrac:
     return ZPKFrac(S=S0, tau0=tau0_0, z=z, a=a, p=p, k=k)
 
 # ---------------- Residuals & Fit ----------------
-def residuals(v, omega, mag, phi_unw, R, J, w_mag, w_phase):
+def residuals_zpk(v, omega, mag, phi_unw, R, J, w_mag, w_phase):
     """ZPK residual function for optimization.
     
     Args:
@@ -458,10 +456,10 @@ def residuals(v, omega, mag, phi_unw, R, J, w_mag, w_phase):
     Returns:
         Weighted residual vector
     """
-    pars = unpack_uncon(v, R, J)
+    pars = unpack_uncon_zpk(v, R, J)
     H = H_zpk_frac(omega, pars)
     r_mag  = np.log(mag + 1e-12) - np.log(np.abs(H) + 1e-12)
-    r_phase= wrap_pi(phi_unw - np.angle(H))
+    r_phase= wrap_to_pi(phi_unw - np.angle(H))
     return np.concatenate([np.sqrt(w_mag)*r_mag, np.sqrt(w_phase)*r_phase])
 
 def fit_ftf_zpk(omega, mag, phase, *,
@@ -497,25 +495,25 @@ def fit_ftf_zpk(omega, mag, phase, *,
 
     # init
     p0 = init_zpk_frac(w, M, phi_unw, R, J)
-    x0 = pack_uncon(p0)
+    x0 = pack_uncon_zpk(p0)
 
     # mag-only prefit (stabilizes)
     def res_mag_only(v): 
-        pars = unpack_uncon(v, R, J)
+        pars = unpack_uncon_zpk(v, R, J)
         H = H_zpk_frac(w, pars)
         return np.sqrt(w_mag)*(np.log(M+1e-12)-np.log(np.abs(H)+1e-12))
     x1 = least_squares(res_mag_only, x0, method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev//2).x
 
     # joint fit
-    sol = least_squares(residuals, x1, args=(w,M,phi_unw,R,J,w_mag,w_phase),
+    sol = least_squares(residuals_zpk, x1, args=(w,M,phi_unw,R,J,w_mag,w_phase),
                         method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
-    pars = unpack_uncon(sol.x, R, J)
+    pars = unpack_uncon_zpk(sol.x, R, J)
     Hf   = H_zpk_frac(w, pars)
     info = {
         "success": bool(sol.success), "message": sol.message, "nfev": int(sol.nfev),
         "cost": float(sol.cost),
         "logmag_rmse": float(np.sqrt(np.mean((np.log(M+1e-12)-np.log(np.abs(Hf)+1e-12))**2))),
-        "phase_rmse_rad": float(np.sqrt(np.mean(wrap_pi(phi_unw - np.angle(Hf))**2))),
+        "phase_rmse_rad": float(np.sqrt(np.mean(wrap_to_pi(phi_unw - np.angle(Hf))**2))),
         "params": {"S": float(pars.S), "tau0": float(pars.tau0),
                    "z": pars.z.tolist(), "a": pars.a.tolist(),
                    "p": pars.p.tolist(), "k": pars.k.tolist()}
@@ -591,3 +589,312 @@ def plot_zpk_fit(omega, mag, phase, pars: ZPKFrac, phase_in_degrees=False, title
 # print(info)
 # fig = plot_zpk_fit(omega, mag, phase, pars)
 # plt.show()
+
+
+
+# -------------------- Two-Pathway FTF Model --------------------
+# Two-pathway model decomposes flame response into parallel physical mechanisms:
+# 1. Equivalence ratio (φ) pathway: fuel/mixture fluctuations → positive heat release
+# 2. Turbulence/velocity pathway: velocity fluctuations → negative heat release
+# 
+# Mathematical form: I(ω) = A_φ G_φ(ω) - A_t G_t(ω)
+# where G_i(ω) = exp(-iωτ_i)(1+iωθ_i)^(-k_i) are Gamma-distributed delay kernels
+# 
+# References:
+# • Lieuwen, T. (2012). Unsteady Combustor Physics. Cambridge University Press.
+#   Chapter on distributed delays and multi-pathway decomposition of FTFs.
+# • Schuller, T., Durox, D., Candel, S. (2003). A unified model for the prediction 
+#   of laminar flame transfer functions. Combust. Flame 134, 21–34.
+# • Noiray, N. & Schuermans, B. (2013). Deterministic quantities characterizing 
+#   noise driven Hopf bifurcations in gas turbine combustors. Int. J. Non-Linear Mech. 50, 152–163.
+
+
+@dataclass
+class TwoPathParams:
+    """Two-pathway FTF parameters.
+    
+    Models flame response via parallel equivalence ratio and turbulence pathways.
+    Based on Lieuwen's decomposition: I(ω) = A_φ G_φ(ω) - A_t G_t(ω)
+    
+    Args:
+        A_phi: Equivalence ratio pathway amplitude (dimensionless, > 0)
+        A_t: Turbulence pathway amplitude (dimensionless, > 0)
+        tau_phi: ER pathway bulk delay [s] (>= 0)
+        tau_t: Turbulence pathway bulk delay [s] (>= 0)
+        theta_phi: ER pathway time constant [s] (> 0)
+        theta_t: Turbulence pathway time constant [s] (> 0)
+        k_phi: ER pathway shape exponent (dimensionless, > 0)
+        k_t: Turbulence pathway shape exponent (dimensionless, > 0)
+    """
+    A_phi: float; A_t: float
+    tau_phi: float; tau_t: float
+    theta_phi: float; theta_t: float
+    k_phi: float; k_t: float
+
+def G_gamma(omega, k, theta, tau):
+    """Gamma-distributed delay kernel for two-pathway model.
+    
+    G(ω) = exp(-i ω τ) * (1 + i ω θ)^(-k)
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        k: Shape exponent (dimensionless, > 0)
+        theta: Time constant [s] (> 0)
+        tau: Bulk delay [s] (>= 0)
+        
+    Returns:
+        Complex transfer function values
+    """
+    return np.exp(-1j*omega*tau) * (1.0 + 1j*omega*theta)**(-k)
+
+def I_two_path(omega, p: TwoPathParams):
+    """Two-pathway interaction index function.
+    
+    I(ω) = A_φ G_φ(ω) - A_t G_t(ω)
+    
+    Models flame response as superposition of equivalence ratio (positive)
+    and turbulence (negative) pathways with Gamma-distributed delays.
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        p: Two-pathway parameters
+        
+    Returns:
+        Complex interaction index values
+    """
+    return (p.A_phi * G_gamma(omega, p.k_phi, p.theta_phi, p.tau_phi)
+            - p.A_t   * G_gamma(omega, p.k_t,   p.theta_t,   p.tau_t))
+
+# -------- Utilities --------
+def unwrap_phase_twopath(phi, deg=False):
+    phi = np.asarray(phi, float)
+    if deg: phi = np.deg2rad(phi)
+    return np.unwrap(phi)
+
+def wrap_pi_twopath(x):
+    return (x + np.pi) % (2*np.pi) - np.pi
+
+def softplus_twopath(x): return np.log1p(np.exp(x))
+def inv_softplus_twopath(y):
+    y = np.asarray(y, float)
+    return np.log(np.expm1(np.maximum(y, 1e-12)))
+
+def pack_uncon_twopath(p: TwoPathParams) -> np.ndarray:
+    v = [
+        inv_softplus_twopath(p.A_phi), inv_softplus_twopath(p.A_t),
+        inv_softplus_twopath(p.tau_phi), inv_softplus_twopath(p.tau_t),
+        inv_softplus_twopath(p.theta_phi), inv_softplus_twopath(p.theta_t),
+        inv_softplus_twopath(p.k_phi), inv_softplus_twopath(p.k_t),
+    ]
+    return np.array(v, float)
+
+def unpack_uncon_twopath(v: np.ndarray) -> TwoPathParams:
+    v = np.asarray(v, float).ravel()
+    i=0
+    A_phi = softplus_twopath(v[i]); i+=1
+    A_t   = softplus_twopath(v[i]); i+=1
+    tau_p = softplus_twopath(v[i]); i+=1
+    tau_t = softplus_twopath(v[i]); i+=1
+    th_p  = softplus_twopath(v[i]); i+=1
+    th_t  = softplus_twopath(v[i]); i+=1
+    k_p   = softplus_twopath(v[i]); i+=1
+    k_t   = softplus_twopath(v[i]); i+=1
+    return TwoPathParams(A_phi, A_t, tau_p, tau_t, th_p, th_t, k_p, k_t)
+
+def magphase_to_complex(mag, phase, phase_in_degrees=False):
+    phi = unwrap_phase_twopath(phase, deg=phase_in_degrees)
+    return np.asarray(mag, float) * np.exp(1j*phi)
+
+# -------- Heuristic init --------
+def init_two_path(omega, M_use, phi_unw) -> TwoPathParams:
+    """Generate initial two-pathway parameter guess from FTF data.
+    
+    Uses heuristics based on low-frequency behavior and corner frequencies
+    to initialize equivalence ratio and turbulence pathway parameters.
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        M_use: Magnitude data (linear scale)
+        phi_unw: Unwrapped phase [rad]
+        
+    Returns:
+        Initial two-pathway parameters
+    """
+    # Low-f slope → bulk delay ~ mean convective time
+    nlo = max(3, int(0.15*len(omega)))
+    A = np.vstack([omega[:nlo], np.ones(nlo)]).T
+    slope, _ = np.linalg.lstsq(A, phi_unw[:nlo], rcond=None)[0]
+    tau0 = float(np.clip(-slope, 0.0, 1.0/(omega[1]-omega[0] + 1e-9)))
+
+    S0 = float(np.median(np.clip(M_use[:nlo], 1e-8, None)))
+    # Gentle cancellation at low f → pick A_phi ≳ A_t, both ~ O(S0)
+    A_phi = max(S0, 1e-3)
+    A_t   = 0.6 * A_phi
+
+    # Corners from crude -3 dB point
+    target = S0/np.sqrt(2)
+    idx = np.where(M_use <= target)[0]
+    wc = omega[idx[0]] if idx.size else omega[len(omega)//3]
+    t_fast = 0.5/max(wc, 1e-6); t_slow = 2.5/max(wc, 1e-6)
+
+    return TwoPathParams(
+        A_phi=A_phi, A_t=A_t,
+        tau_phi=tau0, tau_t=1.3*tau0,
+        theta_phi=t_fast, theta_t=t_slow,
+        k_phi=1.0, k_t=1.0
+    )
+
+# -------- Residuals --------
+def residuals_joint(x, omega, M_use, phi_unw, w_mag, w_phase):
+    p = unpack_uncon_twopath(x)
+    I = I_two_path(omega, p)
+    r_mag  = np.log(M_use + 1e-12) - np.log(np.abs(I) + 1e-12)
+    r_phase= wrap_pi_twopath(phi_unw - np.angle(I))
+    return np.concatenate([np.sqrt(w_mag)*r_mag, np.sqrt(w_phase)*r_phase])
+
+# -------- Main fit --------
+def fit_ftf_two_path(omega, mag, phase, *,
+                     phase_in_degrees=False,
+                     normalize=True, T_ratio=None,
+                     w_mag=1.0, w_phase=1.0,
+                     robust="soft_l1", f_scale=1.0,
+                     max_nfev=20000) -> Tuple[TwoPathParams, Dict]:
+    """Fit two-pathway FTF model to frequency response data.
+    
+    Models flame response via parallel equivalence ratio and turbulence pathways
+    with Gamma-distributed delays. Best for complex interference patterns.
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        mag: Magnitude data (linear scale)
+        phase: Phase data [rad] or [deg]
+        phase_in_degrees: True if phase input is in degrees
+        normalize: If True, fits I = (T22-1)/(T_ratio-1); else fits I directly
+        T_ratio: Temperature ratio T2/T1 (required if normalize=True)
+        w_mag: Magnitude weighting (1.0 = equal weight)
+        w_phase: Phase weighting (1.0 = equal weight)
+        robust: Loss function ('soft_l1', 'huber', 'linear')
+        f_scale: Robust loss scale parameter
+        max_nfev: Maximum function evaluations
+        
+    Returns:
+        Tuple of (fitted_params, info_dict)
+    """
+    idx = np.argsort(omega)
+    w   = np.asarray(omega, float)[idx]
+    M   = np.asarray(mag,   float)[idx]
+    ph  = np.asarray(phase, float)[idx]
+
+    if normalize:
+        if T_ratio is None:
+            raise ValueError("normalize=True requires T_ratio (T2/T1).")
+        Tr = np.asarray(T_ratio, float)
+        Tr = np.full_like(w, float(Tr)) if Tr.size==1 else Tr[idx]
+        T22 = magphase_to_complex(M, ph, phase_in_degrees)
+        I_c = (T22 - 1.0) / (Tr - 1.0 + 1e-12)
+        M_use = np.abs(I_c)
+        phi_unw = unwrap_phase_twopath(np.angle(I_c), deg=False)
+    else:
+        M_use = M
+        phi_unw = unwrap_phase_twopath(ph, deg=phase_in_degrees)
+
+    p0 = init_two_path(w, M_use, phi_unw)
+    x0 = pack_uncon_twopath(p0)
+
+    # Mag-only prefit to stabilize
+    def res_mag_only(x):
+        p = unpack_uncon_twopath(x); I = I_two_path(w, p)
+        return np.sqrt(w_mag) * (np.log(M_use+1e-12)-np.log(np.abs(I)+1e-12))
+    x1 = least_squares(res_mag_only, x0, method="trf",
+                       loss=robust, f_scale=f_scale, max_nfev=max_nfev//2).x
+
+    # Joint fit
+    sol = least_squares(residuals_joint, x1,
+                        args=(w, M_use, phi_unw, w_mag, w_phase),
+                        method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
+    p_hat = unpack_uncon_twopath(sol.x)
+    I_fit = I_two_path(w, p_hat)
+
+    info = {
+        "success": bool(sol.success),
+        "message": sol.message,
+        "nfev": int(sol.nfev),
+        "cost": float(sol.cost),
+        "fitted_domain": "interaction_index" if normalize else "I_direct",
+        "logmag_rmse": float(np.sqrt(np.mean((np.log(M_use+1e-12)-np.log(np.abs(I_fit)+1e-12))**2))),
+        "phase_rmse_rad": float(np.sqrt(np.mean(wrap_pi_twopath(phi_unw - np.angle(I_fit))**2))),
+        "params": p_hat.__dict__
+    }
+
+    # Helper to reconstruct T22 if you fitted I
+    if normalize:
+        info["to_T22"] = lambda omega_eval, T_ratio_eval: \
+            1.0 + (np.asarray(T_ratio_eval, float) - 1.0) * I_two_path(np.asarray(omega_eval, float), p_hat)
+
+    return p_hat, info
+
+# -------- Plot helper --------
+def plot_two_path(omega, mag, phase, p: TwoPathParams, *,
+                  phase_in_degrees=False, normalize=True, T_ratio=None, title=None):
+    """Plot two-pathway FTF fit comparison.
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        mag: Measured magnitude (linear)
+        phase: Measured phase [rad] or [deg]
+        p: Fitted two-pathway parameters
+        phase_in_degrees: True if phase is in degrees
+        normalize: True if plotting T22, False if plotting I directly
+        T_ratio: Temperature ratio T2/T1 (required if normalize=True)
+        title: Plot title
+        
+    Returns:
+        Figure object
+    """
+    w = np.asarray(omega, float); f = w/(2*np.pi)
+    if normalize:
+        if T_ratio is None: raise ValueError("plot_two_path: need T_ratio when normalize=True.")
+        Tr = np.asarray(T_ratio, float)
+        I_fit = I_two_path(w, p)
+        T22_fit = 1.0 + (Tr - 1.0) * I_fit
+        T22_meas = magphase_to_complex(mag, phase, phase_in_degrees)
+        phi_u = unwrap_phase_twopath(phase, deg=phase_in_degrees)
+        ph_fit = np.angle(T22_fit); ph_fit += np.round((phi_u - ph_fit)/(2*np.pi))*2*np.pi
+        fig, ax = plt.subplots(1,2, figsize=(9,3.8))
+        ax[0].plot(f, np.abs(T22_meas), 'o', ms=4, label='|T22| meas')
+        ax[0].plot(f, np.abs(T22_fit),  '-', lw=2, label='|T22| fit (two-path)')
+        ax[0].set_xlabel('Hz'); ax[0].set_ylabel('|T22|'); ax[0].grid(alpha=.3); ax[0].legend()
+        show_meas = phi_u if not phase_in_degrees else np.rad2deg(phi_u)
+        show_fit  = ph_fit if not phase_in_degrees else np.rad2deg(ph_fit)
+        ax[1].plot(f, show_meas, 'o', ms=4, label='phase meas (unw)')
+        ax[1].plot(f, show_fit,  '-', lw=2, label='phase fit')
+        ax[1].set_xlabel('Hz'); ax[1].set_ylabel('Phase [rad]' if not phase_in_degrees else 'Phase [deg]')
+        ax[1].grid(alpha=.3); ax[1].legend()
+        if title: fig.suptitle(title); plt.tight_layout()
+        return fig
+    else:
+        I_meas = magphase_to_complex(mag, phase, phase_in_degrees)
+        phi_u = unwrap_phase_twopath(np.angle(I_meas), deg=False)
+        I_fit = I_two_path(w, p)
+        ph_fit = np.angle(I_fit); ph_fit += np.round((phi_u - ph_fit)/(2*np.pi))*2*np.pi
+        fig, ax = plt.subplots(1,2, figsize=(9,3.8))
+        ax[0].plot(f, np.abs(I_meas), 'o', ms=4, label='|I| meas')
+        ax[0].plot(f, np.abs(I_fit),  '-', lw=2, label='|I| fit')
+        ax[0].set_xlabel('Hz'); ax[0].set_ylabel('|I|'); ax[0].grid(alpha=.3); ax[0].legend()
+        ax[1].plot(f, phi_u, 'o', ms=4, label='phase meas (unw)')
+        ax[1].plot(f, ph_fit, '-', lw=2, label='phase fit')
+        ax[1].set_xlabel('Hz'); ax[1].set_ylabel('Phase [rad]'); ax[1].grid(alpha=.3); ax[1].legend()
+        if title: fig.suptitle(title); plt.tight_layout()
+        return fig
+
+# example usage
+# Given T22 data (omega [rad/s], |T22|, phase [rad or deg]) and T_ratio = T2/T1
+# p_hat, info = fit_ftf_two_path(
+#     omega, mag=abs_T22, phase=phase_T22,
+#     phase_in_degrees=False,
+#     normalize=True, T_ratio=T2_over_T1,   # ← fit in interaction-index domain
+#     w_mag=1.0, w_phase=1.0, robust="soft_l1"
+# )
+# print(info["fitted_domain"], info["logmag_rmse"], info["phase_rmse_rad"])
+# fig = plot_two_path(omega, abs_T22, phase_T22, p_hat, normalize=True, T_ratio=T2_over_T1, title="Two-Pathway FTF")
+        
