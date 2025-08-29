@@ -1,96 +1,67 @@
 #!/usr/bin/env python3
 """
-Example usage of DTL, ZPK-Fractional, and Two-Pathway FTF models from pyftf
+Example usage of Two-Delay Gamma FTF model fitting.
+
+This script demonstrates:
+1. Basic Two-Delay Gamma FTF model fitting to interaction index I(ω) data
+2. Grid search over shape parameters (m_phi, m_t) to find optimal values
+3. T22 normalization fitting using temperature ratio T2/T1
+
+The Two-Delay Gamma model represents flame transfer function as:
+I(ω) = A_phi * G_phi(ω) - A_t * G_t(ω)
+
+where G_i(ω) = exp(-iωτ_i) * (1 + iωθ_i)^(-m_i) are Gamma distributed time delays
+representing equivalence ratio (phi) and turbulence (t) pathways.
 """
 
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 
 # Import the FTF functions
-exec(open('./pyftf.py').read())
+from pyftf import *
 
-def create_synthetic_dtl_data():
-    """Create synthetic DTL FTF data for testing"""
+def create_synthetic_two_delay_data():
+    """
+    Create synthetic two-delay gamma FTF data for testing.
+    
+    Generates interaction index I(ω) data using known parameters,
+    representing the (T2/T1 - 1) * I domain (i.e., T22 - 1).
+    
+    Returns:
+    --------
+    omega : array
+        Angular frequency array [rad/s]
+    mag : array
+        Magnitude of (T2/T1 - 1) * I(ω)
+    phase : array
+        Phase of (T2/T1 - 1) * I(ω) [rad]
+    true_params : TwoDelayParams
+        True parameters used to generate data
+    m_phi, m_t : int
+        True shape parameters
+    """
     # Frequency range
     omega = np.logspace(0, 3, 100)  # 1 to 1000 rad/s
     
     # True parameters for synthetic data
-    true_params = DTLParams(
-        S=2.5,
-        tau0=0.001,
-        thetas=np.array([0.01]),
-        ks=np.array([1.2])
+    true_params = TwoDelayParams(
+        A_phi=1.8,      # Equivalence ratio pathway amplitude
+        A_t=1.2,        # Turbulence pathway amplitude  
+        tau_phi=0.003,  # ER pathway delay [s]
+        r_tau=0.85,     # Delay ratio (tau_t = r_tau * tau_phi)
+        theta_phi=0.012, # ER pathway time constant [s]
+        theta_t=0.018   # Turbulence pathway time constant [s]
     )
     
-    # Generate synthetic FTF
-    H_true = H_dtl(omega, true_params)
+    # Integer shape parameters
+    m_phi = 2  # ER pathway shape
+    m_t = 3    # Turbulence pathway shape
+    
+    # Generate synthetic FTF using interaction index
+    I_true = I_two_delay(omega, true_params, m_phi, m_t)
     
     # Add some noise
     np.random.seed(42)
-    noise_level = 0.05
-    mag_noise = 1 + noise_level * np.random.randn(len(omega))
-    phase_noise = noise_level * np.random.randn(len(omega))
-    
-    mag = np.abs(H_true) * mag_noise
-    phase = np.angle(H_true) + phase_noise
-    
-    return omega, mag, phase, true_params
-
-def create_synthetic_zpk_data():
-    """Create synthetic ZPK-Fractional FTF data with rising-then-falling magnitude"""
-    # Frequency range
-    omega = np.logspace(0, 3, 100)  # 1 to 1000 rad/s
-    
-    # True parameters for synthetic ZPK data that creates rising-then-falling behavior
-    # Zero at low frequency creates rising magnitude, pole at higher frequency creates fall-off
-    true_params = ZPKFrac(
-        S=0.5,                   # Lower gain to start
-        tau0=0.001,              # Small delay
-        z=np.array([0.02]),      # Zero time constant (creates rising behavior)
-        a=np.array([1.0]),       # Zero exponent (20 dB/dec rise)
-        p=np.array([0.005]),     # Pole time constant (creates fall-off)
-        k=np.array([1.5])        # Pole exponent (30 dB/dec fall)
-    )
-    
-    # Generate synthetic FTF
-    H_true = H_zpk_frac(omega, true_params)
-    
-    # Add some noise
-    np.random.seed(123)
-    noise_level = 0.03
-    mag_noise = 1 + noise_level * np.random.randn(len(omega))
-    phase_noise = noise_level * np.random.randn(len(omega))
-    
-    mag = np.abs(H_true) * mag_noise
-    phase = np.angle(H_true) + phase_noise
-    
-    return omega, mag, phase, true_params
-
-def create_synthetic_two_pathway_data():
-    """Create synthetic two-pathway FTF data with complex interference patterns"""
-    # Frequency range
-    omega = np.logspace(0, 3, 100)  # 1 to 1000 rad/s
-    
-    # True parameters for synthetic two-pathway data
-    # Pathway 1: equivalence ratio pathway (positive contribution)
-    # Pathway 2: turbulence/velocity pathway (negative contribution)
-    true_params = TwoPathParams(
-        A_phi=1.5,      # Equivalence ratio amplitude
-        A_t=1.2,        # Turbulence amplitude
-        tau_phi=0.002,  # ER pathway delay
-        tau_t=0.003,    # Turbulence pathway delay
-        theta_phi=0.008, # ER time constant
-        theta_t=0.015,   # Turbulence time constant
-        k_phi=1.0,      # ER shape parameter
-        k_t=1.3         # Turbulence shape parameter
-    )
-    
-    # Generate synthetic FTF using interaction index formulation
-    I_true = I_two_path(omega, true_params)
-    
-    # Add some noise
-    np.random.seed(456)
     noise_level = 0.04
     mag_noise = 1 + noise_level * np.random.randn(len(omega))
     phase_noise = noise_level * np.random.randn(len(omega))
@@ -98,74 +69,66 @@ def create_synthetic_two_pathway_data():
     mag = np.abs(I_true) * mag_noise
     phase = np.angle(I_true) + phase_noise
     
-    return omega, mag, phase, true_params
+    return omega, mag, phase, true_params, m_phi, m_t
 
-def run_dtl_example():
-    """Run DTL FTF model example"""
-    print("DTL FTF Model Example")
-    print("=" * 30)
+def create_synthetic_T22_data():
+    """
+    Create synthetic T22 FTF data for testing normalization.
     
-    # Create synthetic data
-    omega, mag, phase, true_params = create_synthetic_dtl_data()
+    Generates T22 = 1 + (T_ratio - 1) * I(ω) data from known parameters,
+    where T_ratio is the temperature ratio T2/T1.
     
-    print(f"Generated {len(omega)} frequency points")
-    print(f"Frequency range: {omega[0]/(2*np.pi):.2f} to {omega[-1]/(2*np.pi):.2f} Hz")
+    Returns:
+    --------
+    omega : array
+        Angular frequency array [rad/s]
+    mag : array
+        Magnitude of T22(ω)
+    phase : array
+        Phase of T22(ω) [rad]
+    true_params : TwoDelayParams
+        True parameters used to generate data
+    m_phi, m_t : int
+        True shape parameters
+    T_ratio : float
+        Temperature ratio T2/T1
+    """
+    # Use the same parameters as the basic example for consistency
+    omega, I_mag, I_phase, true_params, m_phi, m_t = create_synthetic_two_delay_data()
     
-    # Fit the model
-    print("\nFitting DTL model...")
-    p_hat, info = fit_ftf(
-        omega, mag, phase,
-        phase_in_degrees=False,
-        J=1,
-        w_mag=1.0,
-        w_phase=1.0,
-        robust="soft_l1",
-        f_scale=1.0
-    )
+    # Temperature ratio
+    T_ratio = 3.5  # T2/T1 - moderate ratio
     
-    # Print results
-    print(f"\nDTL Fit Results:")
-    print(f"Success: {info['success']}")
-    print(f"Cost: {info['cost']:.6f}")
-    print(f"Function evaluations: {info['nfev']}")
-    print(f"Log-magnitude RMSE: {info['logmag_rmse']:.6f}")
-    print(f"Phase RMSE [rad]: {info['phase_rmse_rad']:.6f}")
+    # Convert I to T22 = 1 + (T_ratio - 1) * I
+    I_complex = I_mag * np.exp(1j * I_phase)
+    T22_complex = 1.0 + (T_ratio - 1.0) * I_complex
     
-    print(f"\nFitted Parameters:")
-    print(f"S (gain): {p_hat.S:.4f} (true: {true_params.S:.4f})")
-    print(f"tau0 [s]: {p_hat.tau0:.6f} (true: {true_params.tau0:.6f})")
-    print(f"theta [s]: {p_hat.thetas[0]:.6f} (true: {true_params.thetas[0]:.6f})")
-    print(f"k [-]: {p_hat.ks[0]:.4f} (true: {true_params.ks[0]:.4f})")
+    # Extract magnitude and phase
+    mag = np.abs(T22_complex)
+    phase = np.angle(T22_complex)
     
-    # Create plot
-    fig = plot_fit(omega, mag, phase, p_hat, 
-                   phase_in_degrees=False, 
-                   title="DTL FTF Model Fit Example")
-    
-    # Save plot
-    plt.savefig('dtl_ftf_fit_example.png', dpi=150, bbox_inches='tight')
-    print(f"\nPlot saved as 'dtl_ftf_fit_example.png'")
-    
-    return p_hat, info
+    return omega, mag, phase, true_params, m_phi, m_t, T_ratio
 
-def run_zpk_example():
-    """Run ZPK-Fractional FTF model example"""
-    print("\n\nZPK-Fractional FTF Model Example")
+def run_two_delay_example():
+    """Run Two-Delay Gamma FTF model example"""
+    print("Two-Delay Gamma FTF Model Example")
     print("=" * 40)
     
     # Create synthetic data
-    omega, mag, phase, true_params = create_synthetic_zpk_data()
+    omega, mag, phase, true_params, m_phi_true, m_t_true = create_synthetic_two_delay_data()
     
     print(f"Generated {len(omega)} frequency points")
     print(f"Frequency range: {omega[0]/(2*np.pi):.2f} to {omega[-1]/(2*np.pi):.2f} Hz")
+    print(f"True shape parameters: m_phi={m_phi_true}, m_t={m_t_true}")
     
-    # Fit the ZPK model
-    print("\nFitting ZPK-Fractional model...")
-    p_hat, info = fit_ftf_zpk(
+    # Fit the model with single shape parameters
+    print(f"\nFitting Two-Delay Gamma model (m_phi={m_phi_true}, m_t={m_t_true})...")
+    p_hat, info = fit_two_delay_gamma(
         omega, mag, phase,
         phase_in_degrees=False,
-        R=1,  # 1 zero
-        J=1,  # 1 pole
+        m_phi=m_phi_true,
+        m_t=m_t_true,
+        normalize=False,  # Data is already in I(omega) domain
         w_mag=1.0,
         w_phase=1.0,
         robust="soft_l1",
@@ -173,201 +136,243 @@ def run_zpk_example():
     )
     
     # Print results
-    print(f"\nZPK Fit Results:")
+    print(f"\nTwo-Delay Gamma Fit Results:")
     print(f"Success: {info['success']}")
     print(f"Cost: {info['cost']:.6f}")
     print(f"Function evaluations: {info['nfev']}")
     print(f"Log-magnitude RMSE: {info['logmag_rmse']:.6f}")
     print(f"Phase RMSE [rad]: {info['phase_rmse_rad']:.6f}")
+    print(f"Fitted domain: {info['fitted_domain']}")
     
     print(f"\nFitted Parameters:")
-    print(f"S (gain): {p_hat.S:.4f} (true: {true_params.S:.4f})")
-    print(f"tau0 [s]: {p_hat.tau0:.6f} (true: {true_params.tau0:.6f})")
-    print(f"z (zero time const) [s]: {p_hat.z[0]:.6f} (true: {true_params.z[0]:.6f})")
-    print(f"a (zero exponent) [-]: {p_hat.a[0]:.4f} (true: {true_params.a[0]:.4f})")
-    print(f"p (pole time const) [s]: {p_hat.p[0]:.6f} (true: {true_params.p[0]:.6f})")
-    print(f"k (pole exponent) [-]: {p_hat.k[0]:.4f} (true: {true_params.k[0]:.4f})")
-    
-    # Create plot
-    fig = plot_zpk_fit(omega, mag, phase, p_hat,
-                       phase_in_degrees=False,
-                       title="ZPK-Fractional FTF Model Fit Example")
-    
-    # Save plot
-    plt.savefig('zpk_ftf_fit_example.png', dpi=150, bbox_inches='tight')
-    print(f"\nPlot saved as 'zpk_ftf_fit_example.png'")
-    
-    return p_hat, info
-
-def run_two_pathway_example():
-    """Run Two-Pathway FTF model example"""
-    print("\n\nTwo-Pathway FTF Model Example")
-    print("=" * 40)
-    
-    # Create synthetic data
-    omega, mag, phase, true_params = create_synthetic_two_pathway_data()
-    
-    print(f"Generated {len(omega)} frequency points")
-    print(f"Frequency range: {omega[0]/(2*np.pi):.2f} to {omega[-1]/(2*np.pi):.2f} Hz")
-    
-    # Fit the Two-Pathway model (direct I fitting, not normalized)
-    print("\nFitting Two-Pathway model...")
-    p_hat, info = fit_ftf_two_path(
-        omega, mag, phase,
-        phase_in_degrees=False,
-        normalize=False,  # Fitting interaction index directly
-        w_mag=1.0,
-        w_phase=1.0,
-        robust="soft_l1",
-        f_scale=1.0
-    )
-    
-    # Print results
-    print(f"\nTwo-Pathway Fit Results:")
-    print(f"Success: {info['success']}")
-    print(f"Cost: {info['cost']:.6f}")
-    print(f"Function evaluations: {info['nfev']}")
-    print(f"Log-magnitude RMSE: {info['logmag_rmse']:.6f}")
-    print(f"Phase RMSE [rad]: {info['phase_rmse_rad']:.6f}")
-    
-    print(f"\nFitted Parameters:")
-    print(f"A_phi (ER amplitude): {p_hat.A_phi:.4f} (true: {true_params.A_phi:.4f})")
-    print(f"A_t (turb amplitude): {p_hat.A_t:.4f} (true: {true_params.A_t:.4f})")
+    print(f"A_phi: {p_hat.A_phi:.4f} (true: {true_params.A_phi:.4f})")
+    print(f"A_t: {p_hat.A_t:.4f} (true: {true_params.A_t:.4f})")
     print(f"tau_phi [s]: {p_hat.tau_phi:.6f} (true: {true_params.tau_phi:.6f})")
-    print(f"tau_t [s]: {p_hat.tau_t:.6f} (true: {true_params.tau_t:.6f})")
+    print(f"r_tau: {p_hat.r_tau:.4f} (true: {true_params.r_tau:.4f})")
+    print(f"tau_t [s]: {p_hat.r_tau * p_hat.tau_phi:.6f} (true: {true_params.r_tau * true_params.tau_phi:.6f})")
     print(f"theta_phi [s]: {p_hat.theta_phi:.6f} (true: {true_params.theta_phi:.6f})")
     print(f"theta_t [s]: {p_hat.theta_t:.6f} (true: {true_params.theta_t:.6f})")
-    print(f"k_phi [-]: {p_hat.k_phi:.4f} (true: {true_params.k_phi:.4f})")
-    print(f"k_t [-]: {p_hat.k_t:.4f} (true: {true_params.k_t:.4f})")
     
     # Create plot
-    fig = plot_two_path(omega, mag, phase, p_hat,
-                       phase_in_degrees=False,
-                       normalize=False,  # Direct I plotting
-                       title="Two-Pathway FTF Model Fit Example")
+    I_fit = I_two_delay(omega, p_hat, m_phi_true, m_t_true)
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     
-    # Save plot
-    plt.savefig('two_pathway_ftf_fit_example.png', dpi=150, bbox_inches='tight')
-    print(f"\nPlot saved as 'two_pathway_ftf_fit_example.png'")
+    # Magnitude plot
+    axes[0].loglog(omega/(2*np.pi), mag, 'o', ms=4, alpha=0.7, label='Synthetic data')
+    axes[0].loglog(omega/(2*np.pi), np.abs(I_fit), '-', lw=2, label='Fitted model')
+    axes[0].set_xlabel('Frequency [Hz]')
+    axes[0].set_ylabel('|I(ω)|')
+    axes[0].set_title('Magnitude')
+    axes[0].legend()
+    axes[0].grid(alpha=0.3)
+    
+    # Phase plot
+    phi_unw = unwrap_phase(phase, deg=False)
+    phase_fit = np.angle(I_fit)
+    # Align phase for plotting
+    phase_fit += np.round((phi_unw - phase_fit)/(2*np.pi))*2*np.pi
+    
+    axes[1].semilogx(omega/(2*np.pi), phi_unw, 'o', ms=4, alpha=0.7, label='Synthetic data')
+    axes[1].semilogx(omega/(2*np.pi), phase_fit, '-', lw=2, label='Fitted model')
+    axes[1].set_xlabel('Frequency [Hz]')
+    axes[1].set_ylabel('Phase [rad]')
+    axes[1].set_title('Phase')
+    axes[1].legend()
+    axes[1].grid(alpha=0.3)
+    
+    plt.suptitle(f'Two-Delay Gamma FTF Fit (m_phi={m_phi_true}, m_t={m_t_true})')
+    plt.tight_layout()
+    plt.savefig('two_delay_gamma_fit_example.png', dpi=150, bbox_inches='tight')
+    print(f"\nPlot saved as 'two_delay_gamma_fit_example.png'")
     
     return p_hat, info
 
-def test_rising_falling_behavior():
-    """Test both models on rising-then-falling magnitude data"""
-    print("\n\nTesting Rising-Then-Falling Magnitude Behavior")
-    print("=" * 55)
-    
-    # Create synthetic data with rising-then-falling behavior
-    omega, mag, phase, true_zpk_params = create_synthetic_zpk_data()
-    
-    print(f"Generated {len(omega)} frequency points with rising-then-falling behavior")
-    print(f"Frequency range: {omega[0]/(2*np.pi):.2f} to {omega[-1]/(2*np.pi):.2f} Hz")
-    
-    # Test DTL model (should struggle with rising behavior)
-    print("\nTesting DTL model on rising-falling data...")
-    dtl_params, dtl_info = fit_ftf(
-        omega, mag, phase,
-        phase_in_degrees=False,
-        J=2,  # Try 2 poles to see if it helps
-        w_mag=1.0,
-        w_phase=1.0,
-        robust="soft_l1",
-        f_scale=1.0
-    )
-    
-    print(f"DTL Results:")
-    print(f"  Success: {dtl_info['success']}, Cost: {dtl_info['cost']:.6f}")
-    print(f"  Log-mag RMSE: {dtl_info['logmag_rmse']:.6f}")
-    print(f"  Phase RMSE: {dtl_info['phase_rmse_rad']:.6f}")
-    
-    # Test ZPK model (should handle rising-falling better)
-    print("\nTesting ZPK model on rising-falling data...")
-    zpk_params, zpk_info = fit_ftf_zpk(
-        omega, mag, phase,
-        phase_in_degrees=False,
-        R=1,  # 1 zero for rising
-        J=1,  # 1 pole for falling
-        w_mag=1.0,
-        w_phase=1.0,
-        robust="soft_l1",
-        f_scale=1.0
-    )
-    
-    print(f"ZPK Results:")
-    print(f"  Success: {zpk_info['success']}, Cost: {zpk_info['cost']:.6f}")
-    print(f"  Log-mag RMSE: {zpk_info['logmag_rmse']:.6f}")
-    print(f"  Phase RMSE: {zpk_info['phase_rmse_rad']:.6f}")
-    
-    # Create comparison plots
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8))
-    
-    # DTL fit
-    H_dtl_fit = H_dtl(omega, dtl_params)
-    axes[0,0].loglog(omega/(2*np.pi), mag, 'o', ms=3, alpha=0.7, label='True data')
-    axes[0,0].loglog(omega/(2*np.pi), np.abs(H_dtl_fit), '-', lw=2, label='DTL fit')
-    axes[0,0].set_xlabel('Frequency [Hz]')
-    axes[0,0].set_ylabel('|H|')
-    axes[0,0].set_title(f'DTL Model (Cost: {dtl_info["cost"]:.3f})')
-    axes[0,0].legend()
-    axes[0,0].grid(alpha=0.3)
-    
-    # ZPK fit
-    H_zpk_fit = H_zpk_frac(omega, zpk_params)
-    axes[0,1].loglog(omega/(2*np.pi), mag, 'o', ms=3, alpha=0.7, label='True data')
-    axes[0,1].loglog(omega/(2*np.pi), np.abs(H_zpk_fit), '-', lw=2, label='ZPK fit')
-    axes[0,1].set_xlabel('Frequency [Hz]')
-    axes[0,1].set_ylabel('|H|')
-    axes[0,1].set_title(f'ZPK Model (Cost: {zpk_info["cost"]:.3f})')
-    axes[0,1].legend()
-    axes[0,1].grid(alpha=0.3)
-    
-    # Phase comparison
-    phi_unw = unwrap_phase(phase, deg=False)
-    axes[1,0].semilogx(omega/(2*np.pi), phi_unw, 'o', ms=3, alpha=0.7, label='True data')
-    axes[1,0].semilogx(omega/(2*np.pi), np.angle(H_dtl_fit), '-', lw=2, label='DTL fit')
-    axes[1,0].set_xlabel('Frequency [Hz]')
-    axes[1,0].set_ylabel('Phase [rad]')
-    axes[1,0].set_title('DTL Phase')
-    axes[1,0].legend()
-    axes[1,0].grid(alpha=0.3)
-    
-    axes[1,1].semilogx(omega/(2*np.pi), phi_unw, 'o', ms=3, alpha=0.7, label='True data')
-    axes[1,1].semilogx(omega/(2*np.pi), np.angle(H_zpk_fit), '-', lw=2, label='ZPK fit')
-    axes[1,1].set_xlabel('Frequency [Hz]')
-    axes[1,1].set_ylabel('Phase [rad]')
-    axes[1,1].set_title('ZPK Phase')
-    axes[1,1].legend()
-    axes[1,1].grid(alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('rising_falling_comparison.png', dpi=150, bbox_inches='tight')
-    print(f"\nComparison plot saved as 'rising_falling_comparison.png'")
-    
-    return dtl_params, dtl_info, zpk_params, zpk_info
-
-def main():
-    """Main example function - runs DTL, ZPK, and Two-Pathway examples"""
-    print("FTF Model Examples - DTL, ZPK-Fractional, and Two-Pathway")
+def run_grid_search_example():
+    """Run grid search example to find optimal shape parameters"""
+    print("\n\nGrid Search Example - Finding Optimal Shape Parameters")
     print("=" * 60)
     
-    # Run standard examples
-    dtl_params, dtl_info = run_dtl_example()
-    zpk_params, zpk_info = run_zpk_example()
-    two_pathway_params, two_pathway_info = run_two_pathway_example()
+    # Create synthetic data
+    omega, mag, phase, true_params, m_phi_true, m_t_true = create_synthetic_two_delay_data()
     
-    # Test rising-falling behavior
-    dtl_rf_params, dtl_rf_info, zpk_rf_params, zpk_rf_info = test_rising_falling_behavior()
+    print(f"Generated {len(omega)} frequency points")
+    print(f"Frequency range: {omega[0]/(2*np.pi):.2f} to {omega[-1]/(2*np.pi):.2f} Hz")
+    print(f"True shape parameters: m_phi={m_phi_true}, m_t={m_t_true}")
+    
+    # Run grid search to find optimal shape parameters
+    print("\nRunning grid search over shape parameters...")
+    print("Testing m_phi, m_t in range [1, 5]...")
+    
+    best, results = fit_two_delay_gamma_grid(
+        omega, mag, phase,
+        phase_in_degrees=False,
+        mphi_list=range(1, 6),  # Test m_phi from 1 to 5
+        mt_list=range(1, 6),    # Test m_t from 1 to 5
+        normalize=False,        # Data is already in I(omega) domain
+        w_mag=1.0,
+        w_phase=1.0,
+        selection="rmse",       # Use RMSE for selection
+        max_nfev=10000          # Reduced for faster grid search
+    )
+    
+    # Print results
+    print(f"\nGrid Search Results:")
+    print(f"Best shape parameters: m_phi={best['m_phi']}, m_t={best['m_t']} (true: m_phi={m_phi_true}, m_t={m_t_true})")
+    print(f"Best score (RMSE): {best['score']:.6f}")
+    print(f"Success: {best['info']['success']}")
+    print(f"Cost: {best['info']['cost']:.6f}")
+    print(f"Log-magnitude RMSE: {best['info']['logmag_rmse']:.6f}")
+    print(f"Phase RMSE [rad]: {best['info']['phase_rmse_rad']:.6f}")
+    
+    # Show top 5 results
+    print(f"\nTop 5 shape parameter combinations:")
+    sorted_results = sorted(results, key=lambda x: x['score'])
+    for i, result in enumerate(sorted_results[:5]):
+        print(f"  {i+1}. m_phi={result['m_phi']}, m_t={result['m_t']}: score={result['score']:.6f}")
+    
+    return best, results
+
+def run_normalization_example():
+    """Run normalization example with T22 data"""
+    print("\n\nNormalization Example - T22 Data")
+    print("=" * 40)
+    
+    # Create synthetic T22 data
+    omega, mag, phase, true_params, m_phi_true, m_t_true, T_ratio = create_synthetic_T22_data()
+    
+    print(f"Generated {len(omega)} frequency points")
+    print(f"Frequency range: {omega[0]/(2*np.pi):.2f} to {omega[-1]/(2*np.pi):.2f} Hz")
+    print(f"Temperature ratio T2/T1: {T_ratio}")
+    print(f"True shape parameters: m_phi={m_phi_true}, m_t={m_t_true}")
+    
+    # Fit with normalization using true shape parameters
+    print(f"\nFitting with normalization (T22 -> I domain) using true shape parameters...")
+    p_hat, info = fit_two_delay_gamma(
+        omega, mag, phase,
+        phase_in_degrees=False,
+        m_phi=m_phi_true,
+        m_t=m_t_true,
+        normalize=True,     # Normalize T22 data to I domain
+        T_ratio=T_ratio,    # Temperature ratio for normalization
+        w_mag=1.0,
+        w_phase=1.0,
+        robust="soft_l1",
+        f_scale=1.0
+    )
+    
+    # Also test with grid search to compare
+    print(f"\nFor comparison, testing grid search over shape parameters...")
+    try:
+        best, results = fit_two_delay_gamma_grid(
+            omega, mag, phase,
+            phase_in_degrees=False,
+            mphi_list=range(1, 4),
+            mt_list=range(1, 4),
+            normalize=True,
+            T_ratio=T_ratio,
+            selection="rmse",
+            max_nfev=3000
+        )
+        print(f"Grid search best: m_phi={best['m_phi']}, m_t={best['m_t']}, score={best['score']:.6f}")
+    except Exception as e:
+        print(f"Grid search failed: {e}")
+        best = None
+    
+    # Print results
+    print(f"\nNormalized Fit Results:")
+    print(f"Success: {info['success']}")
+    print(f"Cost: {info['cost']:.6f}")
+    print(f"Function evaluations: {info['nfev']}")
+    print(f"Log-magnitude RMSE: {info['logmag_rmse']:.6f}")
+    print(f"Phase RMSE [rad]: {info['phase_rmse_rad']:.6f}")
+    print(f"Fitted domain: {info['fitted_domain']}")
+    
+    print(f"\nFitted Parameters:")
+    print(f"A_phi: {p_hat.A_phi:.4f} (true: {true_params.A_phi:.4f})")
+    print(f"A_t: {p_hat.A_t:.4f} (true: {true_params.A_t:.4f})")
+    print(f"tau_phi [s]: {p_hat.tau_phi:.6f} (true: {true_params.tau_phi:.6f})")
+    print(f"r_tau: {p_hat.r_tau:.4f} (true: {true_params.r_tau:.4f})")
+    print(f"theta_phi [s]: {p_hat.theta_phi:.6f} (true: {true_params.theta_phi:.6f})")
+    print(f"theta_t [s]: {p_hat.theta_t:.6f} (true: {true_params.theta_t:.6f})")
+    
+    # Test T22 reconstruction
+    T22_pred = info["to_T22"](omega, T_ratio)
+    
+    # Calculate true T22 from true parameters for comparison
+    I_true = I_two_delay(omega, true_params, m_phi_true, m_t_true)
+    T22_true = 1.0 + (T_ratio - 1.0) * I_true
+    
+    # Create plot comparing original T22 and reconstructed T22
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    
+    # Magnitude plot
+    axes[0].loglog(omega/(2*np.pi), mag, 'o', ms=4, alpha=0.7, label='Original T22 data')
+    axes[0].loglog(omega/(2*np.pi), np.abs(T22_pred), '-', lw=2, label='Fitted T22')
+    axes[0].loglog(omega/(2*np.pi), np.abs(T22_true), '--', lw=2, label='True T22 (ideal fit)')
+    axes[0].set_xlabel('Frequency [Hz]')
+    axes[0].set_ylabel('|T22|')
+    axes[0].set_title('T22 Magnitude')
+    axes[0].legend()
+    axes[0].grid(alpha=0.3)
+    
+    # Phase plot
+    phi_unw = unwrap_phase(phase, deg=False)
+    phase_pred = np.angle(T22_pred)
+    phase_true = np.angle(T22_true)
+    # Align phases for plotting
+    phase_pred += np.round((phi_unw - phase_pred)/(2*np.pi))*2*np.pi
+    phase_true += np.round((phi_unw - phase_true)/(2*np.pi))*2*np.pi
+    
+    axes[1].semilogx(omega/(2*np.pi), phi_unw, 'o', ms=4, alpha=0.7, label='Original T22 data')
+    axes[1].semilogx(omega/(2*np.pi), phase_pred, '-', lw=2, label='Fitted T22')
+    axes[1].semilogx(omega/(2*np.pi), phase_true, '--', lw=2, label='True T22 (ideal fit)')
+    axes[1].set_xlabel('Frequency [Hz]')
+    axes[1].set_ylabel('Phase [rad]')
+    axes[1].set_title('T22 Phase')
+    axes[1].legend()
+    axes[1].grid(alpha=0.3)
+    
+    plt.suptitle(f'T22 Normalization Example (T2/T1={T_ratio})')
+    plt.tight_layout()
+    plt.savefig('normalization_example.png', dpi=150, bbox_inches='tight')
+    print(f"\nPlot saved as 'normalization_example.png'")
+    
+    return p_hat, info
+
+def main():
+    """Main example function - runs Two-Delay Gamma FTF examples"""
+    print("Two-Delay Gamma FTF Model Examples")
+    print("=" * 50)
+    
+    # Run examples
+    print("Running basic two-delay gamma example...")
+    two_delay_params, two_delay_info = run_two_delay_example()
+    
+    print("\nRunning grid search example...")
+    best_grid, grid_results = run_grid_search_example()
+    
+    print("\nRunning normalization example...")
+    norm_params, norm_info = run_normalization_example()
     
     # Summary comparison
-    print("\n\nSummary Comparison:")
+    print("\n\nSummary:")
     print("=" * 20)
-    print("Standard synthetic data:")
-    print(f"  DTL Model - Success: {dtl_info['success']}, Cost: {dtl_info['cost']:.6f}")
-    print(f"  ZPK Model - Success: {zpk_info['success']}, Cost: {zpk_info['cost']:.6f}")
-    print(f"  Two-Pathway Model - Success: {two_pathway_info['success']}, Cost: {two_pathway_info['cost']:.6f}")
-    print("\nRising-then-falling data:")
-    print(f"  DTL Model - Success: {dtl_rf_info['success']}, Cost: {dtl_rf_info['cost']:.6f}")
-    print(f"  ZPK Model - Success: {zpk_rf_info['success']}, Cost: {zpk_rf_info['cost']:.6f}")
+    print("Basic fit:")
+    print(f"  Success: {two_delay_info['success']}, Cost: {two_delay_info['cost']:.6f}")
+    print(f"  Log-mag RMSE: {two_delay_info['logmag_rmse']:.6f}, Phase RMSE: {two_delay_info['phase_rmse_rad']:.6f}")
+    
+    print("Grid search:")
+    print(f"  Best shapes: m_phi={best_grid['m_phi']}, m_t={best_grid['m_t']}")
+    print(f"  Success: {best_grid['info']['success']}, Cost: {best_grid['info']['cost']:.6f}")
+    print(f"  Log-mag RMSE: {best_grid['info']['logmag_rmse']:.6f}, Phase RMSE: {best_grid['info']['phase_rmse_rad']:.6f}")
+    
+    print("Normalization:")
+    print(f"  Success: {norm_info['success']}, Cost: {norm_info['cost']:.6f}")
+    print(f"  Log-mag RMSE: {norm_info['logmag_rmse']:.6f}, Phase RMSE: {norm_info['phase_rmse_rad']:.6f}")
+    
+    print(f"\nGenerated plots:")
+    print(f"  - two_delay_gamma_fit_example.png")
+    print(f"  - normalization_example.png")
     
     # Show plots (comment out if running headless)
     plt.show()
