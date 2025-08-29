@@ -58,6 +58,20 @@ def H_dtl(omega: np.ndarray, p: DTLParams) -> np.ndarray:
         H *= (1.0 + 1j * omega * theta) ** (-k)
     return H
 
+def calculate_ftf_dtl(omega: np.ndarray, params: DTLParams) -> np.ndarray:
+    """Calculate DTL flame transfer function from parameters.
+    
+    Convenience wrapper for H_dtl() with clear naming.
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        params: DTL parameters
+        
+    Returns:
+        Complex FTF values H(ω)
+    """
+    return H_dtl(omega, params)
+
 # -------------------- Phase handling --------------------
 
 def unwrap_phase(phi: np.ndarray, deg: bool = False) -> np.ndarray:
@@ -358,6 +372,20 @@ def H_zpk_frac(omega: np.ndarray, p: ZPKFrac) -> np.ndarray:
     for pr, kr in zip(p.p, p.k):
         H /= (1.0 + 1j * omega * pr) ** (kr)
     return H
+
+def calculate_ftf_zpk(omega: np.ndarray, params: ZPKFrac) -> np.ndarray:
+    """Calculate ZPK-Fractional flame transfer function from parameters.
+    
+    Convenience wrapper for H_zpk_frac() with clear naming.
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        params: ZPK-Fractional parameters
+        
+    Returns:
+        Complex FTF values H(ω)
+    """
+    return H_zpk_frac(omega, params)
 
 # ---------------- Utilities (ZPK-specific) ----------------
 def softplus_zpk(x):
@@ -664,6 +692,26 @@ def I_two_path(omega, p: TwoPathParams):
     """
     return (p.A_phi * G_gamma(omega, p.k_phi, p.theta_phi, p.tau_phi)
             - p.A_t   * G_gamma(omega, p.k_t,   p.theta_t,   p.tau_t))
+
+def calculate_ftf_two_pathway(omega: np.ndarray, params: TwoPathParams, 
+                             T_ratio: float = None) -> np.ndarray:
+    """Calculate two-pathway flame transfer function from parameters.
+    
+    Can return either interaction index I(ω) or full FTF T22(ω).
+    
+    Args:
+        omega: Angular frequency [rad/s]
+        params: Two-pathway parameters
+        T_ratio: Temperature ratio T2/T1. If provided, returns T22(ω) = 1 + (T_ratio-1)*I(ω).
+                If None, returns interaction index I(ω) directly.
+        
+    Returns:
+        Complex FTF values: I(ω) if T_ratio=None, else T22(ω)
+    """
+    I = I_two_path(omega, params)
+    if T_ratio is not None:
+        return 1.0 + (T_ratio - 1.0) * I
+    return I
 
 # -------- Utilities --------
 def unwrap_phase_twopath(phi, deg=False):
