@@ -10,6 +10,7 @@ This package implements the Two-Delay Gamma FTF model for combustion dynamics an
 
 - **`pyftf.py`** - Two-Delay Gamma FTF model implementation with parameter fitting and grid search capabilities
 - **`pyftf_demo.py`** - Comprehensive examples demonstrating model usage with synthetic data generation, fitting, and visualization
+  - Includes a fuel-split pilot/main blending demo with I(ω) and T22(ω) sweeps
 - **`FTF_fits_references.md`** - Technical reference documentation with equations and usage guidelines
  - **`entropy_loop.py`** - Breathing-mode loop with OU forcing, LBO gate, entropy pockets, and Bake-style conversion (analytic PSD + helpers)
  - **`entropy_loop_demo.py`** - Demo script for the entropy loop (PSD and time-trace synthesis)
@@ -27,9 +28,9 @@ This package implements the Two-Delay Gamma FTF model for combustion dynamics an
    ```
 
 3. Run the example:
-   ```bash
-   python pyftf_demo.py
-   ```
+    ```bash
+    python pyftf_demo.py
+    ```
 
 4. Run the entropy loop demo:
    ```bash
@@ -44,6 +45,7 @@ This package implements the Two-Delay Gamma FTF model for combustion dynamics an
 - **T22 Normalization**: Reliable handling of T22 data using temperature ratio T2/T1 with automatic I-domain conversion
 - **Multi-Start Optimization**: Avoids local minima through multiple random initializations
 - **Comprehensive Examples**: Multiple usage scenarios with synthetic data generation and visualization
+ - **Fuel-Split Blending**: Mix pilot and main stages via a logistic split with optional alignment/cross-term
 
 ## Model Equation
 
@@ -88,6 +90,43 @@ best, results = fit_two_delay_gamma_grid(
     mt_list=range(1, 6),
     selection="rmse"
 )
+```
+
+## Fuel-Split API
+
+Blend pilot and main two-delay stages into a mixed interaction index `I_mix(ω, α)` and project to T22.
+
+```python
+from pyftf import FuelSplitConfig, fuel_split_I, T22_from_fuel_split, TwoDelayParams
+
+# Define pilot and main parameters (Two-Delay Gamma per stage)
+pilot = TwoDelayParams(A_phi=0.7, A_t=0.4, tau_phi=3.2e-3, r_tau=0.9, theta_phi=1.6e-3, theta_t=0.9e-3)
+main  = TwoDelayParams(A_phi=0.45, A_t=0.65, tau_phi=2.3e-3, r_tau=0.82, theta_phi=1.1e-3, theta_t=0.7e-3)
+
+cfg = FuelSplitConfig(
+    s0=0.0, s1=5.0, s2=0.0,   # logistic weight for pilot vs main
+    dtau_pilot=0.0, dtau_main=0.0,  # optional phase-align shifts
+    kappa=0.0, tau_c=0.0            # optional cross-term strength/delay
+)
+
+alpha = 0.5  # fuel split in [0, 1]
+I_mix = fuel_split_I(omega, alpha, pilot, main, m_pilot_phi=2, m_pilot_t=2, m_main_phi=2, m_main_t=2, cfg=cfg)
+
+# Project to raw T22 with temperature ratio T2/T1
+T_ratio = 3.5
+T22 = T22_from_fuel_split(omega, alpha, pilot, main, T_ratio, cfg=cfg)
+```
+
+Demo script section: `run_fuel_split_example()` in `pyftf_demo.py` generates:
+
+- `fuel_split_I_example.png` (|I_mix| and phase sweeps over α)
+- `fuel_split_T22_example.png` (|T22| and phase sweeps over α)
+
+Run the demo after activating the environment:
+
+```bash
+source venv/bin/activate
+python pyftf_demo.py
 ```
 
 ## Silencing runtime warnings
