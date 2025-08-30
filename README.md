@@ -9,8 +9,10 @@ This package implements the Two-Delay Gamma FTF model for combustion dynamics an
 ## Contents
 
 - **`pyftf.py`** - Two-Delay Gamma FTF model implementation with parameter fitting and grid search capabilities
-- **`example_usage.py`** - Comprehensive examples demonstrating model usage with synthetic data generation, fitting, and visualization
+- **`pyftf_demo.py`** - Comprehensive examples demonstrating model usage with synthetic data generation, fitting, and visualization
 - **`FTF_fits_references.md`** - Technical reference documentation with equations and usage guidelines
+ - **`entropy_loop.py`** - Breathing-mode loop with OU forcing, LBO gate, entropy pockets, and Bake-style conversion (analytic PSD + helpers)
+ - **`entropy_loop_demo.py`** - Demo script for the entropy loop (PSD and time-trace synthesis)
 
 ## Usage
 
@@ -26,7 +28,12 @@ This package implements the Two-Delay Gamma FTF model for combustion dynamics an
 
 3. Run the example:
    ```bash
-   python example_usage.py
+   python pyftf_demo.py
+   ```
+
+4. Run the entropy loop demo:
+   ```bash
+   python entropy_loop_demo.py
    ```
 
 ## Features
@@ -80,6 +87,37 @@ best, results = fit_two_delay_gamma_grid(
     mphi_list=range(1, 6),
     mt_list=range(1, 6),
     selection="rmse"
+)
+```
+
+## Silencing runtime warnings
+
+During optimization, NumPy/SciPy may emit runtime warnings (overflow, divide-by-zero, invalid operations). You can silence these per-call by setting `suppress_warnings=True`.
+
+Default: `suppress_warnings=False` (warnings shown).
+
+```python
+# Suppress warnings in a single fit
+params, info = fit_two_delay_gamma(
+    omega, magnitude, phase,
+    m_phi=2, m_t=3,
+    suppress_warnings=True
+)
+
+# Suppress warnings in grid search
+best, results = fit_two_delay_gamma_grid(
+    omega, magnitude, phase,
+    mphi_list=range(1, 6), mt_list=range(1, 6),
+    selection="rmse",
+    suppress_warnings=True
+)
+
+# With normalization
+params, info = fit_two_delay_gamma(
+    omega, T22_mag, T22_phase,
+    m_phi=2, m_t=3,
+    normalize=True, T_ratio=3.5,
+    suppress_warnings=True
 )
 ```
 

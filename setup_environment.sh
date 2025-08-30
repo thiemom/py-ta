@@ -1,7 +1,7 @@
 #!/bin/bash
 
-# Setup script for py-ftf environment
-echo "Setting up Python environment for py-ftf..."
+# Setup script for py-ta environment
+echo "Setting up Python environment for py-ta..."
 
 # Create virtual environment
 python3 -m venv venv
@@ -17,4 +17,3 @@ pip install -r requirements.txt
 
 echo "Environment setup complete!"
 echo "To activate the environment, run: source venv/bin/activate"
-echo "To run the py-ftf code, use: python py-ftf.py"

@@ -1,7 +1,73 @@
+# -*- coding: utf-8 -*-
+r"""
+pyftf.py — Two-Delay Gamma Flame Transfer Function (FTF) model and fitting
+
+This module implements the Two-Delay Gamma FTF model and provides robust
+fitting utilities, including grid search over shape parameters and optional
+normalization for T22 data.
+
+Two-Delay Gamma FTF Model
+-------------------------
+Unicode/plain equations:
+    I(ω) = A_φ · G_φ(ω) − A_t · G_t(ω)
+where
+    G_i(ω) = exp(−i ω (τ_i + θ_i)) · Γ(m_i) / (Γ(m_i) + (i ω τ_i)^{m_i})
+
+LaTeX form:
+    I(\omega) = A_\phi\,G_\phi(\omega) - A_t\,G_t(\omega),\quad
+    G_i(\omega) = e^{-i\omega(\tau_i+\theta_i)}\,\frac{\Gamma(m_i)}{\Gamma(m_i) + (i\omega\tau_i)^{m_i}}
+
+Meaning
+-------
+- A_φ, A_t: pathway amplitudes (equivalence ratio and turbulence)
+- τ_φ, τ_t: characteristic delays [s]
+- θ_φ, θ_t: additional phase delays [s]
+- m_φ, m_t: integer shape parameters (delay distribution width)
+- Positive ER pathway, negative turbulence pathway → interference patterns
+
+Features
+--------
+- Superposition of two physical mechanisms (ER and turbulence)
+- Gamma-distributed delay kernels per pathway (distributed-delay/DTL)
+- Captures interference, magnitude nulls, and phase jumps
+- Independent delay distribution parameters per pathway
+- Shape parameters control distribution width (higher m → narrower)
+
+Data normalization
+------------------
+This module supports both domains:
+- Direct I(ω) fitting (interaction index domain)
+- T22 normalization: I(ω) = (T22(ω) − 1) / (T2/T1 − 1)
+
+Historical context (very brief)
+-------------------------------
+- Crocco & Cheng (system-theory view; zeros/poles)
+- Dowling (thermoacoustic ZPK transfer functions)
+- Schuermans & Polifke (industrial low‑order flame models, DTL)
+- Lieuwen, Noiray, Polifke (robust ID, stochastic links, modern reviews)
+
+Key references
+--------------
+- Lieuwen, T. (2012). Unsteady Combustor Physics. CUP. (distributed delays, two-pathway)
+- Schuller, T., Durox, D., Candel, S. (2003). Combustion and Flame. (laminar FTF model)
+- Noiray, N., Schuermans, B. (2013). IJNLM. (noise-driven Hopf metrics)
+- Polifke, W. (2020). Prog. Energy Combust. Sci. (FTF/FDF/DTL system ID)
+- Schuller, T., Noiray, N., Poinsot, T., Candel, S. (2020). J. Fluid Mech. (overview & normalization)
+
+Usage
+-----
+See fit utilities in this module:
+- fit_two_delay_gamma(omega, mag, phase, ...)
+- fit_two_delay_gamma_grid(omega, mag, phase, ...)
+
+For a complete example, run pyftf_demo.py.
+"""
 import numpy as np
 from dataclasses import dataclass
 from typing import Sequence, Tuple, Dict, List, Callable, Optional
 from scipy.optimize import least_squares
+import warnings
+from contextlib import contextmanager
 
 # Two-delay Gamma (DTL) model that:
 # 	• Uses integer Gamma shapes m_phi, m_t in N (cascades of first-order lags)
@@ -129,6 +195,27 @@ def as_weight_array(w, n: int) -> np.ndarray:
         raise ValueError("Weight length must match data length or be scalar.")
     return w.astype(float)
 
+# -------------------- Warning suppression -------------------
+@contextmanager
+def _maybe_suppress_warnings(enabled: bool):
+    """
+    Context manager to optionally silence common NumPy/SciPy runtime warnings
+    such as overflow, divide-by-zero, and invalid operations during optimization.
+    """
+    if not enabled:
+        yield
+        return
+    with np.errstate(divide='ignore', invalid='ignore', over='ignore', under='ignore'):
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', RuntimeWarning)
+            try:
+                # Silence SciPy optimize warnings if available
+                from scipy.optimize import OptimizeWarning
+                warnings.simplefilter('ignore', OptimizeWarning)
+            except Exception:
+                pass
+            yield
+
 # -------------------- Initialization -------------------
 def init_two_delay(omega, M_use, phi_unw, m_phi: int, m_t: int) -> TwoDelayParams:
     nlo = max(3, int(0.15*len(omega)))
@@ -203,7 +290,8 @@ def residuals_complex(x, omega, mag, phase, m_phi, m_t, w_mag_arr, w_phase_arr, 
 
 def _fit_T22_via_I_domain(omega, T22_mag, T22_phase, T_ratio, phase_in_degrees, m_phi, m_t, 
                          w_mag, w_phase, r_min, r0, lambda_r, robust, f_scale, 
-                         max_nfev, multi_start, n_starts, use_complex_residual):
+                         max_nfev, multi_start, n_starts, use_complex_residual,
+                         suppress_warnings: bool = False):
     """
     Internal function: Fit T22 data by converting to I domain, fitting there, then transforming back.
     
@@ -265,7 +353,8 @@ def _fit_T22_via_I_domain(omega, T22_mag, T22_phase, T_ratio, phase_in_degrees, 
         robust=robust, f_scale=f_scale, max_nfev=max_nfev,
         multi_start=multi_start, n_starts=n_starts,
         use_complex_residual=use_complex_residual,
-        use_I_domain_workaround=False  # Prevent infinite recursion
+        use_I_domain_workaround=False,  # Prevent infinite recursion
+        suppress_warnings=suppress_warnings
     )
     
     # Generate fitted I and convert to T22
@@ -304,7 +393,8 @@ def fit_two_delay_gamma(omega, mag, phase, *,
                         max_nfev: int = 50000,
                         multi_start: bool = True, n_starts: int = 5,
                         use_complex_residual: bool = False,
-                        use_I_domain_workaround: bool = True) -> Tuple[TwoDelayParams, Dict]:
+                        use_I_domain_workaround: bool = True,
+                        suppress_warnings: bool = False) -> Tuple[TwoDelayParams, Dict]:
     """
     Fit Two-Delay Gamma FTF model parameters to frequency response data.
     
@@ -348,6 +438,9 @@ def fit_two_delay_gamma(omega, mag, phase, *,
         Use complex residuals instead of separate mag/phase residuals
     use_I_domain_workaround : bool, default True
         For normalize=True, use I domain fitting workaround (recommended)
+    suppress_warnings : bool, default False
+        If True, suppress NumPy/SciPy runtime warnings during fitting (overflow,
+        divide-by-zero, invalid operations, and SciPy Optimize warnings).
         
     Returns:
     --------
@@ -371,7 +464,8 @@ def fit_two_delay_gamma(omega, mag, phase, *,
             # Use I domain workaround to bypass tau_phi optimization issues
             return _fit_T22_via_I_domain(w, M, ph, T_ratio, phase_in_degrees, m_phi, m_t, 
                                        w_mag, w_phase, r_min, r0, lambda_r, robust, f_scale, 
-                                       max_nfev, multi_start, n_starts, use_complex_residual)
+                                       max_nfev, multi_start, n_starts, use_complex_residual,
+                                       suppress_warnings=suppress_warnings)
         else:
             # Fixed normalization approach
             Tr = np.asarray(T_ratio, float)
@@ -423,20 +517,21 @@ def fit_two_delay_gamma(omega, mag, phase, *,
                 return np.sqrt(w_mag_arr) * (np.log(M_use+1e-12) - np.log(np.abs(I)+1e-12))
             
             try:
-                x1 = least_squares(res_mag_only, x0, method="trf", loss=robust,
-                                   f_scale=f_scale, max_nfev=max_nfev//2).x
+                with _maybe_suppress_warnings(suppress_warnings):
+                    x1 = least_squares(res_mag_only, x0, method="trf", loss=robust,
+                                       f_scale=f_scale, max_nfev=max_nfev//2).x
 
-                # joint fit with penalty
-                if use_complex_residual:
-                    sol = least_squares(residuals_complex, x1,
-                                        args=(w, M_use, phi_unw, m_phi, m_t,
-                                              w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
-                                        method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
-                else:
-                    sol = least_squares(residuals_joint, x1,
-                                        args=(w, M_use, phi_unw, m_phi, m_t,
-                                              w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
-                                        method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
+                    # joint fit with penalty
+                    if use_complex_residual:
+                        sol = least_squares(residuals_complex, x1,
+                                            args=(w, M_use, phi_unw, m_phi, m_t,
+                                                  w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
+                                            method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
+                    else:
+                        sol = least_squares(residuals_joint, x1,
+                                            args=(w, M_use, phi_unw, m_phi, m_t,
+                                                  w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
+                                            method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
                 
                 if sol.success and sol.cost < best_cost:
                     best_sol = sol
@@ -454,20 +549,22 @@ def fit_two_delay_gamma(omega, mag, phase, *,
                 p = unpack_uncon(x, r_min=r_min)
                 I = I_two_delay(w, p, m_phi, m_t)
                 return np.sqrt(w_mag_arr) * (np.log(M_use+1e-12) - np.log(np.abs(I)+1e-12))
-            x1 = least_squares(res_mag_only, x0, method="trf", loss=robust,
-                               f_scale=f_scale, max_nfev=max_nfev//2).x
-            if use_complex_residual:
-                sol = least_squares(residuals_complex, x1,
-                                    args=(w, M_use, phi_unw, m_phi, m_t,
-                                          w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
-                                    method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
-            else:
-                sol = least_squares(residuals_joint, x1,
-                                    args=(w, M_use, phi_unw, m_phi, m_t,
-                                          w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
-                                    method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
+            with _maybe_suppress_warnings(suppress_warnings):
+                x1 = least_squares(res_mag_only, x0, method="trf", loss=robust,
+                                   f_scale=f_scale, max_nfev=max_nfev//2).x
+                if use_complex_residual:
+                    sol = least_squares(residuals_complex, x1,
+                                        args=(w, M_use, phi_unw, m_phi, m_t,
+                                              w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
+                                        method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
+                else:
+                    sol = least_squares(residuals_joint, x1,
+                                        args=(w, M_use, phi_unw, m_phi, m_t,
+                                              w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
+                                        method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
             p_hat = unpack_uncon(sol.x, r_min=r_min)
         else:
+            # Use the best multi-start solution
             sol = best_sol
             p_hat = best_p_hat
     else:
@@ -480,20 +577,21 @@ def fit_two_delay_gamma(omega, mag, phase, *,
             p = unpack_uncon(x, r_min=r_min)
             I = I_two_delay(w, p, m_phi, m_t)
             return np.sqrt(w_mag_arr) * (np.log(M_use+1e-12) - np.log(np.abs(I)+1e-12))
-        x1 = least_squares(res_mag_only, x0, method="trf", loss=robust,
-                           f_scale=f_scale, max_nfev=max_nfev//2).x
+        with _maybe_suppress_warnings(suppress_warnings):
+            x1 = least_squares(res_mag_only, x0, method="trf", loss=robust,
+                               f_scale=f_scale, max_nfev=max_nfev//2).x
 
-        # joint fit with penalty
-        if use_complex_residual:
-            sol = least_squares(residuals_complex, x1,
-                                args=(w, M_use, phi_unw, m_phi, m_t,
-                                      w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
-                                method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
-        else:
-            sol = least_squares(residuals_joint, x1,
-                                args=(w, M_use, phi_unw, m_phi, m_t,
-                                      w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
-                                method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
+            # joint fit with penalty
+            if use_complex_residual:
+                sol = least_squares(residuals_complex, x1,
+                                    args=(w, M_use, phi_unw, m_phi, m_t,
+                                          w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
+                                    method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
+            else:
+                sol = least_squares(residuals_joint, x1,
+                                    args=(w, M_use, phi_unw, m_phi, m_t,
+                                          w_mag_arr, w_phase_arr, r_min, r0, lambda_r),
+                                    method="trf", loss=robust, f_scale=f_scale, max_nfev=max_nfev)
         p_hat = unpack_uncon(sol.x, r_min=r_min)
     
     I_fit = I_two_delay(w, p_hat, m_phi, m_t)
@@ -531,7 +629,8 @@ def fit_two_delay_gamma_grid(omega, mag, phase, *,
                              r_min=0.5, r0=0.9, lambda_r=1e-2,
                              robust="soft_l1", f_scale=1.0,
                              selection: str = "rmse",   # "rmse" or "aic"
-                             max_nfev=20000):
+                             max_nfev=20000,
+                             suppress_warnings: bool = False):
     """
     Try multiple integer shapes and pick the best by 'rmse' (default) or 'aic'.
     Defaults: m_phi, m_t in 1..8.
@@ -555,7 +654,8 @@ def fit_two_delay_gamma_grid(omega, mag, phase, *,
                 w_mag=w_mag, w_phase=w_phase,
                 r_min=r_min, r0=r0, lambda_r=lambda_r,
                 robust=robust, f_scale=f_scale,
-                max_nfev=max_nfev
+                max_nfev=max_nfev,
+                suppress_warnings=suppress_warnings
             )
             # score
             if selection.lower() == "aic":
@@ -578,7 +678,7 @@ def fit_two_delay_gamma_grid(omega, mag, phase, *,
 def make_I_callable(p: TwoDelayParams, m_phi: int, m_t: int) -> Callable[[np.ndarray], np.ndarray]:
     return lambda omega: I_two_delay(np.asarray(omega, float), p, m_phi, m_t)
 
-# Example usage (commented out - see example_usage.py for working example):
+# Example usage (commented out - see pyftf_demo.py for working example):
 # Your data: omega [rad/s], mag, phase for the DEFAULT domain (T22 - 1) = (T2/T1 - 1) * I
 # If you have |T22| & phase(T22): set normalize=True and pass T_ratio.
 #

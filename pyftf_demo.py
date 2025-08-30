@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 Example usage of Two-Delay Gamma FTF model fitting.
 
@@ -16,6 +17,7 @@ representing equivalence ratio (phi) and turbulence (t) pathways.
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 
 # Import the FTF functions
 from pyftf import *
@@ -132,7 +134,8 @@ def run_two_delay_example():
         w_mag=1.0,
         w_phase=1.0,
         robust="soft_l1",
-        f_scale=1.0
+        f_scale=1.0,
+        suppress_warnings=True
     )
     
     # Print results
@@ -212,7 +215,8 @@ def run_grid_search_example():
         w_mag=1.0,
         w_phase=1.0,
         selection="rmse",       # Use RMSE for selection
-        max_nfev=10000          # Reduced for faster grid search
+        max_nfev=10000,         # Reduced for faster grid search
+        suppress_warnings=True
     )
     
     # Print results
@@ -257,7 +261,8 @@ def run_normalization_example():
         w_mag=1.0,
         w_phase=1.0,
         robust="soft_l1",
-        f_scale=1.0
+        f_scale=1.0,
+        suppress_warnings=True
     )
     
     # Also test with grid search to compare
@@ -271,7 +276,8 @@ def run_normalization_example():
             normalize=True,
             T_ratio=T_ratio,
             selection="rmse",
-            max_nfev=3000
+            max_nfev=3000,
+            suppress_warnings=True
         )
         print(f"Grid search best: m_phi={best['m_phi']}, m_t={best['m_t']}, score={best['score']:.6f}")
     except Exception as e:
@@ -374,8 +380,11 @@ def main():
     print(f"  - two_delay_gamma_fit_example.png")
     print(f"  - normalization_example.png")
     
-    # Show plots (comment out if running headless)
-    plt.show()
+    # Show plots only when not running headless (e.g., Agg backend)
+    if "agg" not in mpl.get_backend().lower():
+        plt.show()
+    else:
+        print("[Headless] Backend is Agg; skipping plt.show(). Figures saved.")
 
 if __name__ == "__main__":
     main()
