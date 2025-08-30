@@ -698,8 +698,81 @@ def make_I_callable(p: TwoDelayParams, m_phi: int, m_t: int) -> Callable[[np.nda
 # print("Fit RMSE (log-mag, phase):",
 #       best["info"]["logmag_rmse"], best["info"]["phase_rmse_rad"])
 #
-# # Get the callable interaction index and (optionally) T22 predictor
-# I_best = make_I_callable(best["params"], best["m_phi"], best["m_t"])
-# # If needed, T22 predictions later:
-# # T22_pred = best["info"]["to_T22"](omega_eval, T_ratio_eval)
 
+@dataclass
+class FuelSplitConfig:
+    """
+    Configuration for mixing pilot and main flames via a fuel split α ∈ [0,1].
+    - Logistic weight parameters (s0, s1, s2) define w_pilot(α) = 1/(1+exp(-(s0+s1 α + s2 α^2)))
+    - Small alignment delays dtau_pilot/main shift only phases of each stage
+    - Optional cross-term X with strength kappa and delay tau_c
+    """
+    s0: float = 0.0
+    s1: float = 4.0
+    s2: float = 0.0
+    dtau_pilot: float = 0.0
+    dtau_main: float = 0.0
+    kappa: float = 0.0
+    tau_c: float = 0.0
+
+def _weight_from_split(alpha: float, s0: float, s1: float, s2: float) -> float:
+    a = float(np.clip(alpha, 0.0, 1.0))
+    z = s0 + s1 * a + s2 * (a**2)
+    return float(1.0 / (1.0 + np.exp(-z)))
+
+def fuel_split_I(
+    omega: np.ndarray,
+    fuel_split: float,
+    pilot: TwoDelayParams,
+    main: TwoDelayParams,
+    *,
+    m_pilot_phi: int = 2,
+    m_pilot_t: int = 2,
+    m_main_phi: int = 2,
+    m_main_t: int = 2,
+    cfg: FuelSplitConfig = FuelSplitConfig()
+) -> np.ndarray:
+    """
+    Mixed interaction-index FTF for a given fuel split α.
+    Uses existing `I_two_delay()` to avoid code duplication.
+    """
+    w_p = _weight_from_split(fuel_split, cfg.s0, cfg.s1, cfg.s2)
+    w_m = 1.0 - w_p
+
+    I_p = I_two_delay(omega, pilot, m_pilot_phi, m_pilot_t)
+    I_m = I_two_delay(omega, main,  m_main_phi,  m_main_t)
+
+    w = np.asarray(omega, float)
+    phase_p = np.exp(-1j * w * cfg.dtau_pilot)
+    phase_m = np.exp(-1j * w * cfg.dtau_main)
+
+    P = w_p * phase_p * I_p + w_m * phase_m * I_m
+    if cfg.kappa != 0.0:
+        X = cfg.kappa * np.exp(-1j * w * cfg.tau_c) * (w_p * I_p) * (w_m * I_m)
+        return P + X
+    return P
+
+def T22_from_fuel_split(
+    omega: np.ndarray,
+    fuel_split: float,
+    pilot: TwoDelayParams,
+    main: TwoDelayParams,
+    T_ratio: float,
+    *,
+    m_pilot_phi: int = 2,
+    m_pilot_t: int = 2,
+    m_main_phi: int = 2,
+    m_main_t: int = 2,
+    cfg: FuelSplitConfig = FuelSplitConfig()
+) -> np.ndarray:
+    """
+    Raw burner transfer T22(ω, α) from the mixed interaction index:
+        T22 = 1 + (T2/T1 - 1) * I_mix(ω, α)
+    """
+    I_mix = fuel_split_I(
+        omega, fuel_split, pilot, main,
+        m_pilot_phi=m_pilot_phi, m_pilot_t=m_pilot_t,
+        m_main_phi=m_main_phi, m_main_t=m_main_t,
+        cfg=cfg
+    )
+    return 1.0 + (float(T_ratio) - 1.0) * I_mix

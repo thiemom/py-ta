@@ -190,6 +190,114 @@ def run_two_delay_example():
     
     return p_hat, info
 
+def run_fuel_split_example():
+    """Run fuel-split model example with different pilot/main delays"""
+    print("\n\nFuel-Split Example - Pilot/Main blending")
+    print("=" * 55)
+
+    # Frequency axis (Hz -> rad/s)
+    f = np.logspace(1.8, 2.9, 150)  # ~63 to ~794 Hz
+    omega = 2 * np.pi * f
+
+    # Define distinct pilot and main parameters (different delays/time constants)
+    pilot = TwoDelayParams(
+        A_phi=0.10, A_t=0.40,
+        # Make pilot more "pilot-like": longer delay and broader kernel
+        tau_phi=5.0e-3, r_tau=0.95,
+        theta_phi=2.5e-3, theta_t=1.5e-3
+    )
+    main = TwoDelayParams(
+        A_phi=0.65, A_t=0.65,
+        tau_phi=2.3e-3, r_tau=0.82,
+        theta_phi=1.1e-3, theta_t=0.7e-3
+    )
+
+    # Use different shape parameters per stage
+    # Slightly broader by reducing m_phi for pilot
+    m_pilot_phi, m_pilot_t = 1, 2
+    m_main_phi, m_main_t = 3, 2
+
+    # Fuel split values to visualize
+    alphas = [0.0, 0.25, 0.5, 0.75, 1.0]
+    cfg = FuelSplitConfig(s0=0.0, s1=5.0, s2=0.0, dtau_pilot=0.0, dtau_main=0.0)
+
+    # Temperature ratio for T22 projection
+    T_ratio = 3.5
+
+    # Compute I_mix for different splits
+    curves_I = []
+    for a in alphas:
+        I_mix = fuel_split_I(
+            omega, a, pilot, main,
+            m_pilot_phi=m_pilot_phi, m_pilot_t=m_pilot_t,
+            m_main_phi=m_main_phi, m_main_t=m_main_t,
+            cfg=cfg
+        )
+        curves_I.append((a, I_mix))
+
+    # Plot I magnitude/phase
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    for a, I_mix in curves_I:
+        axes[0].loglog(f, np.abs(I_mix), label=f"alpha={a:.2f}")
+    axes[0].set_xlabel('Frequency [Hz]')
+    axes[0].set_ylabel('|I_mix(ω)|')
+    axes[0].set_title('Fuel-split |I_mix| vs frequency')
+    axes[0].grid(alpha=0.3)
+    axes[0].legend()
+
+    for a, I_mix in curves_I:
+        axes[1].semilogx(f, np.unwrap(np.angle(I_mix)), label=f"alpha={a:.2f}")
+    axes[1].set_xlabel('Frequency [Hz]')
+    axes[1].set_ylabel('Phase [rad]')
+    axes[1].set_title('Fuel-split ∠I_mix vs frequency')
+    axes[1].grid(alpha=0.3)
+    axes[1].legend()
+
+    plt.suptitle('Fuel-split model (pilot/main) using Two-Delay Gamma stages')
+    plt.tight_layout()
+    plt.savefig('fuel_split_I_example.png', dpi=150, bbox_inches='tight')
+    print("Plot saved as 'fuel_split_I_example.png'")
+
+    # T22 projection: sweep the same alpha set for consistency with I_mix
+    curves_T22 = []
+    for a in alphas:
+        T22 = T22_from_fuel_split(
+            omega, a, pilot, main, T_ratio,
+            m_pilot_phi=m_pilot_phi, m_pilot_t=m_pilot_t,
+            m_main_phi=m_main_phi, m_main_t=m_main_t,
+            cfg=cfg
+        )
+        curves_T22.append((a, T22))
+
+    fig2, axes2 = plt.subplots(1, 2, figsize=(12, 5))
+    for a, T22 in curves_T22:
+        axes2[0].loglog(f, np.abs(T22), label=f"alpha={a:.2f}")
+    axes2[0].set_xlabel('Frequency [Hz]')
+    axes2[0].set_ylabel('|T22(ω)|')
+    axes2[0].set_title(f'T22 magnitude (T2/T1={T_ratio})')
+    axes2[0].grid(alpha=0.3)
+    axes2[0].legend()
+
+    for a, T22 in curves_T22:
+        axes2[1].semilogx(f, np.unwrap(np.angle(T22)), label=f"alpha={a:.2f}")
+    axes2[1].set_xlabel('Frequency [Hz]')
+    axes2[1].set_ylabel('Phase [rad]')
+    axes2[1].set_title('T22 phase')
+    axes2[1].grid(alpha=0.3)
+    axes2[1].legend()
+
+    plt.tight_layout()
+    plt.savefig('fuel_split_T22_example.png', dpi=150, bbox_inches='tight')
+    print("Plot saved as 'fuel_split_T22_example.png'")
+
+    return {
+        'alphas': alphas,
+        'pilot': pilot,
+        'main': main,
+        'm_shapes': (m_pilot_phi, m_pilot_t, m_main_phi, m_main_t),
+        'T_ratio': T_ratio
+    }
+
 def run_grid_search_example():
     """Run grid search example to find optimal shape parameters"""
     print("\n\nGrid Search Example - Finding Optimal Shape Parameters")
@@ -359,6 +467,9 @@ def main():
     
     print("\nRunning normalization example...")
     norm_params, norm_info = run_normalization_example()
+
+    print("\nRunning fuel-split example...")
+    fs_info = run_fuel_split_example()
     
     # Summary comparison
     print("\n\nSummary:")
@@ -379,6 +490,8 @@ def main():
     print(f"\nGenerated plots:")
     print(f"  - two_delay_gamma_fit_example.png")
     print(f"  - normalization_example.png")
+    print(f"  - fuel_split_I_example.png")
+    print(f"  - fuel_split_T22_example.png")
     
     # Show plots only when not running headless (e.g., Agg backend)
     if "agg" not in mpl.get_backend().lower():
