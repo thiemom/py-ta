@@ -20,7 +20,7 @@ import matplotlib.pyplot as plt
 import matplotlib as mpl
 
 # Import the FTF functions
-from pyftf import *
+from ftf import *
 
 def create_synthetic_two_delay_data():
     """

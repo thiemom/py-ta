@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 r"""
-pyftf.py — Two-Delay Gamma Flame Transfer Function (FTF) model and fitting
+ftf.py — Two-Delay Gamma Flame Transfer Function (FTF) model and fitting
 
 This module implements the Two-Delay Gamma FTF model and provides robust
 fitting utilities, including grid search over shape parameters and optional
@@ -60,7 +60,7 @@ See fit utilities in this module:
 - fit_two_delay_gamma(omega, mag, phase, ...)
 - fit_two_delay_gamma_grid(omega, mag, phase, ...)
 
-For a complete example, run pyftf_demo.py.
+For a complete example, run ftf_demo.py.
 """
 import numpy as np
 from dataclasses import dataclass
@@ -678,7 +678,7 @@ def fit_two_delay_gamma_grid(omega, mag, phase, *,
 def make_I_callable(p: TwoDelayParams, m_phi: int, m_t: int) -> Callable[[np.ndarray], np.ndarray]:
     return lambda omega: I_two_delay(np.asarray(omega, float), p, m_phi, m_t)
 
-# Example usage (commented out - see pyftf_demo.py for working example):
+# Example usage (commented out - see ftf_demo.py for working example):
 # Your data: omega [rad/s], mag, phase for the DEFAULT domain (T22 - 1) = (T2/T1 - 1) * I
 # If you have |T22| & phase(T22): set normalize=True and pass T_ratio.
 #

@@ -8,8 +8,8 @@ This package implements the Two-Delay Gamma FTF model for combustion dynamics an
 
 ## Contents
 
-- **`pyftf.py`** - Two-Delay Gamma FTF model implementation with parameter fitting and grid search capabilities
-- **`pyftf_demo.py`** - Comprehensive examples demonstrating model usage with synthetic data generation, fitting, and visualization
+- **`ftf.py`** - Two-Delay Gamma FTF model implementation with parameter fitting and grid search capabilities
+- **`ftf_demo.py`** - Comprehensive examples demonstrating model usage with synthetic data generation, fitting, and visualization
   - Includes a fuel-split pilot/main blending demo with I(ω) and T22(ω) sweeps
 - **`FTF_fits_references.md`** - Technical reference documentation with equations and usage guidelines
  - **`entropy_loop.py`** - Breathing-mode loop with OU forcing, LBO gate, entropy pockets, and Bake-style conversion (analytic PSD + helpers)
@@ -29,7 +29,7 @@ This package implements the Two-Delay Gamma FTF model for combustion dynamics an
 
 3. Run the example:
     ```bash
-    python pyftf_demo.py
+    python ftf_demo.py
     ```
 
 4. Run the entropy loop demo:
@@ -66,7 +66,7 @@ where `G_i(ω) = exp(−iω(τ_i + θ_i)) · Γ(m_i) / (Γ(m_i) + (iωτ_i)^m_i)
 ## Quick Start
 
 ```python
-from pyftf import fit_two_delay_gamma, fit_two_delay_gamma_grid
+from ftf import fit_two_delay_gamma, fit_two_delay_gamma_grid
 
 # Basic fitting with known shape parameters
 params, info = fit_two_delay_gamma(
@@ -97,7 +97,7 @@ best, results = fit_two_delay_gamma_grid(
 Blend pilot and main two-delay stages into a mixed interaction index `I_mix(ω, α)` and project to T22.
 
 ```python
-from pyftf import FuelSplitConfig, fuel_split_I, T22_from_fuel_split, TwoDelayParams
+from ftf import FuelSplitConfig, fuel_split_I, T22_from_fuel_split, TwoDelayParams
 
 # Define pilot and main parameters (Two-Delay Gamma per stage)
 pilot = TwoDelayParams(A_phi=0.7, A_t=0.4, tau_phi=3.2e-3, r_tau=0.9, theta_phi=1.6e-3, theta_t=0.9e-3)
@@ -117,7 +117,7 @@ T_ratio = 3.5
 T22 = T22_from_fuel_split(omega, alpha, pilot, main, T_ratio, cfg=cfg)
 ```
 
-Demo script section: `run_fuel_split_example()` in `pyftf_demo.py` generates:
+Demo script section: `run_fuel_split_example()` in `ftf_demo.py` generates:
 
 - `fuel_split_I_example.png` (|I_mix| and phase sweeps over α)
 - `fuel_split_T22_example.png` (|T22| and phase sweeps over α)
@@ -126,7 +126,7 @@ Run the demo after activating the environment:
 
 ```bash
 source venv/bin/activate
-python pyftf_demo.py
+python ftf_demo.py
 ```
 
 ## Silencing runtime warnings
