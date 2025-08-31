@@ -23,6 +23,7 @@
 #     gate = el.GateModel(); gains = el.LoopGains()
 #     S = el.S_pp(w, thermo, flame, ou, bake, gate, gains)
 
+import argparse
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib as mpl
@@ -89,6 +90,20 @@ def segment_fft(x, fs, nfft=8192, overlap=0.5, window="hann", avg_mode="magnitud
 # ---------------- Main demo ----------------
 
 def main():
+    parser = argparse.ArgumentParser(description="Entropy loop demo (analytic PSD + time-trace FFT)")
+    parser.add_argument("--mode", choices=["binary", "fractional"], default="binary", help="Gate mode for refined LBO gate")
+    parser.add_argument("--avg-mode", choices=["magnitude", "power"], default="magnitude", help="FFT averaging mode")
+    parser.add_argument("--nfft", type=int, default=8192, help="FFT size per segment")
+    parser.add_argument("--overlap", type=float, default=0.5, help="Segment overlap fraction (0..0.9)")
+    parser.add_argument("--window", choices=["hann", "hamming", "rect"], default="hann", help="FFT window type")
+    parser.add_argument("--T", type=float, default=20.0, help="Time-trace duration [s]")
+    parser.add_argument("--dt", type=float, default=2e-4, help="Sample time [s]")
+    parser.add_argument("--m", type=float, default=1.8, help="Stability margin proxy")
+    parser.add_argument("--uref", type=float, default=5.0, help="Reference velocity scale for gate sensitivity")
+    parser.add_argument("--pref", type=float, default=1000.0, help="Reference pressure scale [Pa] for gate sensitivity")
+    parser.add_argument("--save-prefix", type=str, default="run", help="Prefix for saved figures")
+    args = parser.parse_args()
+
     # ---- Analytic PSD ----
     fmax = 250.0
     Nf = 2000
@@ -118,24 +133,46 @@ def main():
     plt.title("Analytic PSD: breathing mode")
     plt.legend()
     plt.tight_layout()
-    plt.savefig("analytic_psd.png", dpi=150)
+    plt.savefig(f"{args.save_prefix}_analytic_psd.png", dpi=150)
 
-    # ---- Time-trace synthesis (pocket-only) ----
-    # Make a pocket-only T'/T0, then map to pressure p'(t) approximately
-    T = 20.0     # seconds
-    dt = 2e-4    # sample time
+    # ---- Time-trace synthesis with refined gate ----
+    T = float(args.T)
+    dt = float(args.dt)
     fs = 1.0/dt  # Hz
 
-    y_T_over_T0 = el.simulate_bursts(T, dt, gate, flame)
-    # Simple mapping to pressure using real(G) to get a real waveform;
-    # if you want phase-correct filtering, apply complex filter in freq domain.
+    # Series
+    N = int(T/dt)
+    m_series = np.full(N, float(args.m))
+    u_series = np.zeros(N)
+    p_series = np.zeros(N)
+
+    # Refined gate (defaults match prior demo when mode=binary)
+    gate_ref = el.GateRefined(
+        mode=args.mode,
+        lambda0_off=2.0,
+        lambda0_on=2.0,
+        beta_m_off=0.9,
+        beta_m_on=0.9,
+        kappa_u=0.0,
+        kappa_p=0.0,
+        u_ref=float(args.uref),
+        p_ref=float(args.pref),
+        t_ref_after_off=0.10,
+        t_ref_after_on=0.05,
+        alpha_T=0.6,
+        tau_adv=0.045,
+        sigma_disp=0.018,
+    )
+
+    g, y_T_over_T0 = el.simulate_pockets_refined(T, dt, gate_ref, flame, m_series, u_series, p_series)
+    # Simple mapping to pressure using real(G) to get a real waveform
     p_trace = (thermo.gamma - 1.0) * thermo.p0 * np.real(bake.G()) * y_T_over_T0
 
     # ---- Linear-average & Peak-hold FFTs ----
-    nfft = 8192
-    overlap = 0.5
-    window = "hann"
-    avg_mode = "magnitude"  # or "power"
+    nfft = int(args.nfft)
+    overlap = float(args.overlap)
+    window = args.window
+    avg_mode = args.avg_mode  # or "power"
 
     f_fft, avg_spec, peak_spec = segment_fft(p_trace, fs, nfft=nfft, overlap=overlap,
                                              window=window, avg_mode=avg_mode)
@@ -159,7 +196,19 @@ def main():
     plt.title("Time-trace spectra: linear-average vs peak-hold")
     plt.legend()
     plt.tight_layout()
-    plt.savefig("time_trace_fft.png", dpi=150)
+    plt.savefig(f"{args.save_prefix}_time_trace_fft.png", dpi=150)
+    # Optional: plot the gate trace for diagnostics
+    try:
+        t = np.arange(N)*dt
+        plt.figure(figsize=(7,2.2))
+        plt.plot(t, g, lw=0.8)
+        plt.xlabel("Time [s]")
+        plt.ylabel("g(t)")
+        plt.title(f"Gate trace (mode={args.mode})")
+        plt.tight_layout()
+        plt.savefig(f"{args.save_prefix}_gate_trace.png", dpi=150)
+    except Exception:
+        pass
     # Show only when not running headless (e.g., Agg backend)
     if "agg" not in mpl.get_backend().lower():
         plt.show()

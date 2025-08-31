@@ -47,7 +47,7 @@ Example:
 """
 
 from __future__ import annotations
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 from typing import Optional, Tuple, Dict
 
@@ -377,3 +377,178 @@ def simulate_bursts(T: float, dt: float, gate: GateModel, flame: FlameMap, seed:
                 i0 = n; i1 = min(N, i0 + len(psi))
                 y[i0:i1] += a*psi[:i1-i0]
     return y
+
+# === REFINED LBO GATE START ================================================
+# (import moved to top)
+
+def _sigmoid(x):  # smooth logistic link for probabilities (fractional gate)
+    return 1.0/(1.0 + np.exp(-x))
+
+@dataclass
+class GateRefined:
+    """
+    Refined LBO gate with:
+      - time-varying hazards λ_off/on(m,u,p)
+      - refractory dwell times after switches
+      - optional fractional gate g∈[0,1] that tracks on-probability
+    Use:
+      * mode="binary": random telegraph with refractory
+      * mode="fractional": g follows p_on(t) with OU-like noise
+    """
+    mode: str = "binary"         # "binary" or "fractional"
+    # --- base hazard scales (1/s) and sensitivities
+    lambda0_off: float = 2.0
+    lambda0_on:  float = 2.0
+    beta_m_off:  float = 0.9     # sensitivity to margin m for OFF
+    beta_m_on:   float = 0.9     # sensitivity to margin m for ON
+    kappa_u:     float = 0.0     # sensitivity to |u'|/u_ref
+    kappa_p:     float = 0.0     # sensitivity to |p'|/p_ref
+    u_ref:       float = 5.0     # m/s, set to your typical U
+    p_ref:       float = 1000.0  # Pa, typical fluct. scale
+    # --- refractory (no switching allowed during these windows)
+    t_ref_after_off: float = 0.10
+    t_ref_after_on:  float = 0.05
+    # --- fractional gate dynamics (if mode=="fractional")
+    tau_g:   float = 0.05        # relaxation time toward p_on(t)
+    sigma_g: float = 0.03        # diffusion level for stochastic area changes
+    # --- pocket parameters (same semantics as GateModel)
+    alpha_T: float = 0.6
+    tau_adv: float = 0.04
+    sigma_disp: float = 0.015
+    # internal state (set at simulate time)
+    _rng: np.random.Generator = field(default_factory=lambda: np.random.default_rng(1234))
+
+    def hazards(self, m: float, u: float = 0.0, p: float = 0.0) -> tuple[float,float]:
+        """Instantaneous off/on hazards (1/s) given margin m and fluctuations."""
+        u_norm = abs(u)/(self.u_ref + 1e-12)
+        p_norm = abs(p)/(self.p_ref + 1e-12)
+        # More stable (higher m) -> lower OFF hazard, higher ON hazard
+        lam_off = self.lambda0_off * np.exp(-self.beta_m_off*m) * (1.0 + self.kappa_u*u_norm + self.kappa_p*p_norm)
+        lam_on  = self.lambda0_on  * np.exp(+self.beta_m_on *m) * (1.0 + self.kappa_u*u_norm + self.kappa_p*p_norm)
+        return float(lam_off), float(lam_on)
+
+    # ---- Binary mode simulation with refractory and dispersion pockets ----
+    def simulate_gate_and_pockets_binary(self, T: float, dt: float,
+                                         m_series: np.ndarray,
+                                         u_series: np.ndarray | None = None,
+                                         p_series: np.ndarray | None = None,
+                                         flame: "FlameMap" = None) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Returns:
+          g(t) in {0,1}, and T'(t)/T0 pockets (discrete convolution with Gaussian kernel).
+        Notes:
+          - Pockets are proportional to Δg at switch (±1).
+          - Refractory periods enforced after each switch.
+        """
+        N = int(T/dt)
+        if u_series is None: u_series = np.zeros(N)
+        if p_series is None: p_series = np.zeros(N)
+        g = np.ones(N)  # start burning
+        # Precompute kernel for pocket dispersion
+        tker = np.arange(-5*self.sigma_disp, 5*self.sigma_disp+dt, dt)
+        psi  = np.exp(-0.5*((tker - self.tau_adv)/self.sigma_disp)**2)
+        psi /= (np.sum(psi) + 1e-16)
+
+        T_over_T0 = np.zeros(N)
+        dT_over_T0 = self.alpha_T*(flame.T_hot - flame.T_cold)/(flame.T_cold)  # scale (dimensionless)
+        # Refractory counters
+        ref_counter = 0.0
+        state = 1  # 1=on, 0=off
+
+        for n in range(1, N):
+            m  = float(m_series[n])
+            uu = float(u_series[n])
+            pp = float(p_series[n])
+            lam_off, lam_on = self.hazards(m, uu, pp)
+            if ref_counter > 0.0:
+                ref_counter -= dt
+                g[n] = state
+                continue
+
+            if state == 1:
+                # chance to switch OFF
+                if self._rng.random() < (1.0 - np.exp(-lam_off*dt)):
+                    state = 0
+                    ref_counter = self.t_ref_after_off
+                    g[n] = 0.0
+                    # negative pocket (Δg = -1)
+                    i0 = n; i1 = min(N, i0 + len(psi))
+                    T_over_T0[i0:i1] += (-dT_over_T0) * psi[:i1-i0]
+                else:
+                    g[n] = 1.0
+            else:
+                # chance to switch ON
+                if self._rng.random() < (1.0 - np.exp(-lam_on*dt)):
+                    state = 1
+                    ref_counter = self.t_ref_after_on
+                    g[n] = 1.0
+                    # positive pocket (Δg = +1)
+                    i0 = n; i1 = min(N, i0 + len(psi))
+                    T_over_T0[i0:i1] += (+dT_over_T0) * psi[:i1-i0]
+                else:
+                    g[n] = 0.0
+        return g, T_over_T0
+
+    # ---- Fractional gate: partial quenching with stochastic area changes ----
+    def simulate_gate_and_pockets_fractional(self, T: float, dt: float,
+                                             m_series: np.ndarray,
+                                             u_series: np.ndarray | None = None,
+                                             p_series: np.ndarray | None = None,
+                                             flame: "FlameMap" = None) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Returns:
+          g(t) in [0,1] and T'(t)/T0 pockets produced by incremental Δg>0 (hot) and Δg<0 (cold),
+          each convolved with the dispersion kernel. This mimics spatially partial blow-off/re-ignition.
+        """
+        N = int(T/dt)
+        if u_series is None: u_series = np.zeros(N)
+        if p_series is None: p_series = np.zeros(N)
+
+        # Kernel
+        tker = np.arange(-5*self.sigma_disp, 5*self.sigma_disp+dt, dt)
+        psi  = np.exp(-0.5*((tker - self.tau_adv)/self.sigma_disp)**2)
+        psi /= (np.sum(psi) + 1e-16)
+
+        g = np.zeros(N)
+        T_over_T0 = np.zeros(N)
+        dT_over_T0 = self.alpha_T*(flame.T_hot - flame.T_cold)/(flame.T_cold)
+
+        # Start near quasi-steady on-probability
+        m0 = float(m_series[0])
+        lam_off0, lam_on0 = self.hazards(m0, 0.0, 0.0)
+        p_on = lam_on0/(lam_on0 + lam_off0 + 1e-16)
+        g[0] = np.clip(p_on, 0.0, 1.0)
+
+        for n in range(1, N):
+            m  = float(m_series[n])
+            uu = float(u_series[n])
+            pp = float(p_series[n])
+            lam_off, lam_on = self.hazards(m, uu, pp)
+            p_on = lam_on/(lam_on + lam_off + 1e-16)  # instantaneous on-probability proxy
+
+            # Ornstein–Uhlenbeck toward p_on with diffusion; Euler–Maruyama
+            g_pred = g[n-1] + (dt/self.tau_g)*(p_on - g[n-1]) + self.sigma_g*np.sqrt(dt)*self._rng.standard_normal()
+            g[n] = float(np.clip(g_pred, 0.0, 1.0))
+
+            # incremental pocket proportional to Δg
+            dg = g[n] - g[n-1]
+            if abs(dg) > 0.0:
+                i0 = n; i1 = min(N, i0 + len(psi))
+                T_over_T0[i0:i1] += (np.sign(dg) * dT_over_T0 * abs(dg)) * psi[:i1-i0]
+
+        return g, T_over_T0
+
+# Convenience wrapper to generate pockets with the refined gate
+def simulate_pockets_refined(T: float, dt: float,
+                             gate: GateRefined,
+                             flame: "FlameMap",
+                             m_series: np.ndarray,
+                             u_series: np.ndarray | None = None,
+                             p_series: np.ndarray | None = None) -> tuple[np.ndarray, np.ndarray]:
+    if gate.mode == "binary":
+        return gate.simulate_gate_and_pockets_binary(T, dt, m_series, u_series, p_series, flame)
+    elif gate.mode == "fractional":
+        return gate.simulate_gate_and_pockets_fractional(T, dt, m_series, u_series, p_series, flame)
+    else:
+        raise ValueError("gate.mode must be 'binary' or 'fractional'")
+# === REFINED LBO GATE END ==================================================
