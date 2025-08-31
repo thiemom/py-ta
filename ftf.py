@@ -776,3 +776,244 @@ def T22_from_fuel_split(
         cfg=cfg
     )
     return 1.0 + (float(T_ratio) - 1.0) * I_mix
+
+# ===================== FTF Toolbox (from ftf_patch.py) =====================
+# The following section integrates additional FTF models and simple fitting
+# utilities, while preserving the existing Two-Delay Gamma APIs above.
+
+ComplexTF = Callable[[np.ndarray], np.ndarray]
+
+# -------------------------- FTF Library --------------------------
+def ftf_diffusion(n: float = 0.12, tau: float = 6e-3, fc: float = 120.0, order: int = 1) -> ComplexTF:
+    """Diffusion-like FTF: n * e^{-i ω τ} * (1 + i ω/ωc)^(-order)"""
+    wc = 2*np.pi*fc
+    def F(f: np.ndarray) -> np.ndarray:
+        w = 2*np.pi*f
+        lp = 1.0/(1.0 + 1j*w/wc)
+        if order == 2:
+            lp = lp**2
+        return n * np.exp(-1j*w*tau) * lp
+    return F
+
+def ftf_gamma(n: float = 0.8, nu: float = 3.0, theta_c: float = 2e-3) -> ComplexTF:
+    """Gamma delay kernel (Lieuwen): n * (1 + i ω θ_c)^(-ν)"""
+    def F(f: np.ndarray) -> np.ndarray:
+        w = 2*np.pi*f
+        return n * (1.0 + 1j*w*theta_c)**(-nu)
+    return F
+
+def ftf_dispersion(n: float = 0.3, tau: float = 5e-3, wd: float = 2*np.pi*200.0, k: float = 2.0) -> ComplexTF:
+    """Parmentier-style mixing/dispersion: n * e^{-i ω τ} * exp(-(ω/wd)^k)"""
+    def F(f: np.ndarray) -> np.ndarray:
+        w = 2*np.pi*f
+        return n * np.exp(-1j*w*tau) * np.exp(- (w/wd)**k )
+    return F
+
+def ftf_rational(num0: float = 0.1, num1: float = 0.0, den1: float = 1e-3, den2: float = 0.0) -> ComplexTF:
+    """Low-order rational: (num0 + num1 iω) / (1 + den1 iω + den2 (iω)^2)"""
+    def F(f: np.ndarray) -> np.ndarray:
+        iw = 1j*2*np.pi*f
+        return (num0 + num1*iw) / (1.0 + den1*iw + den2*iw**2)
+    return F
+
+# -------- MISO pilot (velocity + phi with an upstream mixing TF) --------
+@dataclass
+class MISOParams:
+    # velocity-path (diffusion-like)
+    n_u: float = 0.12
+    tau_u: float = 6e-3
+    fc_u: float = 120.0
+    # equivalence-ratio path (premixed-like)
+    n_phi: float = 0.6
+    nu_phi: float = 3.0
+    theta_phi: float = 2e-3
+    # mixing TF between ϕ fluctuations and flame
+    tau_mix: float = 2e-3
+    wd_mix: float = 2*np.pi*300.0
+    k_mix: float = 2.0
+
+def ftf_miso_pilot(params: MISOParams) -> Dict[str, ComplexTF]:
+    """Returns dict with Fu (velocity), Fphi (ϕ), and Mix TF."""
+    Fu   = ftf_diffusion(n=params.n_u, tau=params.tau_u, fc=params.fc_u, order=1)
+    Fphi = ftf_gamma(n=params.n_phi, nu=params.nu_phi, theta_c=params.theta_phi)
+    Mix  = ftf_dispersion(n=1.0, tau=params.tau_mix, wd=params.wd_mix, k=params.k_mix)
+    return {"Fu": Fu, "Fphi": Fphi, "Mix": Mix}
+
+def evaluate_miso(f: np.ndarray, Fu: ComplexTF, Fphi: ComplexTF, Mix: ComplexTF,
+                  u_hat: complex = 1.0, phi_hat: complex = 1.0) -> np.ndarray:
+    """Output = Fu*u' + Fphi*Mix*phi'."""
+    return Fu(f)*u_hat + Fphi(f)*Mix(f)*phi_hat
+
+# ---------------------- Autoignition (zonal) ----------------------
+def ftf_autoignition_zonal(
+    w_ai: float = 0.25,
+    n_prop: float = 0.5, nu_prop: float = 2.5, theta_prop: float = 2e-3, tau_prop: float = 0.0,
+    n_ai: float = 0.4,  nu_ai: float = 1.2, theta_ai: float = 3e-3, tau_ai: float = 2e-3
+) -> ComplexTF:
+    """
+    Zonal superposition: F = (1-w_ai)*F_prop + w_ai*F_AI
+    Simplified single-input form; for multi-input see MISO patterns.
+    """
+    F_prop = lambda f: ftf_gamma(n=n_prop, nu=nu_prop, theta_c=theta_prop)(f) * np.exp(-1j*2*np.pi*f*tau_prop)
+    F_ai   = lambda f: ftf_gamma(n=n_ai,  nu=nu_ai,  theta_c=theta_ai)(f)  * np.exp(-1j*2*np.pi*f*tau_ai)
+    def F(f: np.ndarray) -> np.ndarray:
+        return (1.0 - w_ai)*F_prop(f) + w_ai*F_ai(f)
+    return F
+
+# ------------------------- Ordered Mixer -------------------------
+def mixer_ordered(F_pilot: ComplexTF, F_main: ComplexTF, alpha: float, beta: float = 1.0, normalized: bool = True) -> ComplexTF:
+    """
+    Ordered blend pilot→main with fuel split alpha (main share). Returns callable F(f).
+    """
+    w1 = (1.0 - alpha)**beta
+    w2 = (alpha)**beta
+    if normalized:
+        s = w1 + w2
+        if s == 0: s = 1.0
+        w1, w2 = w1/s, w2/s
+    def F(f: np.ndarray) -> np.ndarray:
+        return w1*F_pilot(f) + w2*F_main(f)
+    return F
+
+# -------------------------- Registries ---------------------------
+ModelFactory = Callable[..., ComplexTF]
+RegistryItem = Tuple[str, Callable[[np.ndarray], np.ndarray], List[str], np.ndarray, np.ndarray]
+
+REGISTRY: Dict[int, RegistryItem] = {
+    0: ("diffusion_lp1", lambda p: ftf_diffusion(p[0], p[1], p[2], order=1),
+        ["n","tau_s","fc_hz"],
+        np.array([0.00, 0.0005,   20.0]),
+        np.array([2.00, 0.0500, 2000.0])),
+    1: ("gamma",        lambda p: ftf_gamma(p[0], p[1], p[2]),
+        ["n","nu","theta_c_s"],
+        np.array([0.00,  0.5,     0.0003]),
+        np.array([2.00,  8.0,     0.0200])),
+    2: ("dispersion",   lambda p: ftf_dispersion(p[0], p[1], p[2], p[3]),
+        ["n","tau_s","wd_rad","k"],
+        np.array([0.00,  0.0005,  2*np.pi* 50.0, 1.0]),
+        np.array([2.00,  0.0500,  2*np.pi*3000.0, 4.0])),
+    3: ("rational_2p",  lambda p: ftf_rational(p[0], p[1], p[2], p[3]),
+        ["num0","num1","den1","den2"],
+        np.array([-2.0, -0.05, -0.02,  -1e-5]),
+        np.array([ 2.0,  0.05,  0.02,   1e-3])),
+    4: ("autoignition_zonal", lambda p: ftf_autoignition_zonal(
+            w_ai=p[0],
+            n_prop=p[1], nu_prop=p[2], theta_prop=p[3], tau_prop=p[4],
+            n_ai=p[5],   nu_ai=p[6],  theta_ai=p[7],  tau_ai=p[8]),
+        ["w_ai","prop.n","prop.nu","prop.theta_c_s","prop.tau_s","ai.n","ai.nu","ai.theta_c_s","ai.tau_s"],
+        np.array([0.00,  0.00,  0.5,   0.0003,  0.0,    0.00, 0.5,  0.0003,  0.0]),
+        np.array([1.00,  2.00,  8.0,   0.0200,  0.050,  2.00, 8.0,  0.0200,  0.050])),
+}
+
+ComboKey   = Tuple[int,int]
+ComboItem  = Tuple[str, Callable[[np.ndarray], np.ndarray], List[str], np.ndarray, np.ndarray]
+
+def build_combo_registry(candidate_ids: List[int], skip_identical: bool = True, beta: float = 1.0) -> Dict[ComboKey, ComboItem]:
+    combos: Dict[ComboKey, ComboItem] = {}
+    for a in candidate_ids:
+        for b in candidate_ids:
+            if skip_identical and (a == b):
+                continue
+            name_a, fa, pa, la, ha = REGISTRY[a]
+            name_b, fb, pb, lb, hb = REGISTRY[b]
+            pname = [f"pilot.{x}" for x in pa] + [f"main.{x}" for x in pb] + ["alpha"]
+            low   = np.concatenate([la, lb, np.array([0.0])])
+            high  = np.concatenate([ha, hb, np.array([1.0])])
+
+            def factory_builder(a=a, b=b, fa=fa, fb=fb, beta=beta):
+                pa_names = REGISTRY[a][2]
+                pb_names = REGISTRY[b][2]
+                na, nb = len(pa_names), len(pb_names)
+                def factory(pvec: np.ndarray) -> ComplexTF:
+                    pa_ = pvec[:na]
+                    pb_ = pvec[na:na+nb]
+                    alpha = float(pvec[-1])
+                    Fp = fa(pa_)
+                    Fm = fb(pb_)
+                    return mixer_ordered(Fp, Fm, alpha=alpha, beta=beta, normalized=True)
+                return factory
+
+            combos[(a,b)] = (f"pilot:{name_a} | main:{name_b}",
+                             factory_builder(),
+                             pname, low, high)
+    return combos
+
+# --------------------------- Fitting -----------------------------
+def _unwrap_phase_ftf(z: np.ndarray) -> np.ndarray:
+    return np.unwrap(np.angle(z))
+
+def loss_complex(Fm: np.ndarray, Fd: np.ndarray, w_mag: float = 1.0, w_ph: float = 1.0) -> float:
+    if w_ph == 0.0:
+        return float(np.mean(np.abs(Fm - Fd)**2))
+    mag_m, mag_d = np.abs(Fm), np.abs(Fd)
+    ph_m,  ph_d  = _unwrap_phase_ftf(Fm), _unwrap_phase_ftf(Fd)
+    mscale = max(np.sqrt(np.mean(mag_d**2)), 1e-12)
+    return float(w_mag*np.mean((mag_m - mag_d)**2)/mscale**2 + w_ph*np.mean((ph_m - ph_d)**2)/np.pi**2)
+
+@dataclass
+class FitResult:
+    key: Tuple[int,int] | None
+    name: str
+    params: np.ndarray
+    param_names: List[str]
+    loss: float
+
+def fit_one_model(f: np.ndarray, F_meas: np.ndarray, item: RegistryItem,
+                  n_starts: int = 256, seed: int = 0, w_mag: float = 1.0, w_ph: float = 1.0) -> FitResult:
+    name, factory, pnames, low, high = item
+    rng = np.random.default_rng(seed)
+    best_L, best_p = np.inf, None
+    P = low.size
+    for k in range(n_starts):
+        u = (k + rng.random(P)) / n_starts
+        p = low + u*(high - low)
+        F = factory(p)(f)
+        L = loss_complex(F, F_meas, w_mag, w_ph)
+        if L < best_L:
+            best_L, best_p = L, p
+    return FitResult(key=None, name=name, params=best_p, param_names=pnames, loss=best_L)
+
+def fit_ftf_with_model_choice(f: np.ndarray, F_meas: np.ndarray,
+                              candidate_ids: List[int] = (0,1,2,3,4),
+                              n_starts_per_model: int = 256, seed: int = 42,
+                              w_mag: float = 1.0, w_ph: float = 1.0) -> FitResult:
+    rng = np.random.default_rng(seed)
+    best = None
+    for mid in candidate_ids:
+        item = REGISTRY[mid]
+        fr = fit_one_model(f, F_meas, item,
+                           n_starts=n_starts_per_model,
+                           seed=int(rng.integers(0, 1_000_000)),
+                           w_mag=w_mag, w_ph=w_ph)
+        if (best is None) or (fr.loss < best.loss):
+            best = fr
+    return best
+
+def fit_combo(f: np.ndarray, F_meas: np.ndarray, combo_item: ComboItem,
+              n_starts: int = 256, seed: int = 0, w_mag: float = 1.0, w_ph: float = 1.0) -> FitResult:
+    name, factory_builder, pnames, low, high = combo_item
+    rng = np.random.default_rng(seed)
+    bestL, bestp = np.inf, None
+    P = low.size
+    for k in range(n_starts):
+        u = (k + rng.random(P)) / n_starts
+        p = low + u*(high - low)
+        F = factory_builder(p)(f)
+        L = loss_complex(F, F_meas, w_mag, w_ph)
+        if L < bestL:
+            bestL, bestp = L, p
+    return FitResult(key=None, name=name, params=bestp, param_names=pnames, loss=bestL)
+
+def fit_over_combos(f: np.ndarray, F_meas: np.ndarray, combo_registry: Dict[ComboKey, ComboItem],
+                    n_starts_per_combo: int = 256, seed: int = 42, w_mag: float = 1.0, w_ph: float = 1.0) -> FitResult:
+    rng = np.random.default_rng(seed)
+    best = None
+    for key, item in combo_registry.items():
+        fr = fit_combo(f, F_meas, item,
+                       n_starts=n_starts_per_combo,
+                       seed=int(rng.integers(0,1_000_000)),
+                       w_mag=w_mag, w_ph=w_ph)
+        if (best is None) or (fr.loss < best.loss):
+            fr.key = key
+            best = fr
+    return best

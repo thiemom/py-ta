@@ -453,6 +453,47 @@ def run_normalization_example():
     
     return p_hat, info
 
+def run_toolbox_synthetic_demo():
+    """Run synthetic demo using the integrated FTF toolbox (diffusion/gamma + ordered mixer).
+
+    This mirrors the minimal example that lived in ftf_patch.py: it generates
+    synthetic data by mixing a diffusion-like pilot with a gamma-like main via
+    an ordered mixer, then fits single models and ordered combos.
+    """
+    print("\n\nToolbox Synthetic Demo - Registry-based fitting")
+    print("=" * 65)
+
+    # Frequency in Hz (toolbox models internally convert to rad/s)
+    f = np.linspace(20, 800, 600)
+
+    # True pilot/main using registry factories
+    Fp = REGISTRY[0][1]([0.12, 6.5e-3, 140.0])  # diffusion_lp1
+    Fm = REGISTRY[1][1]([0.9, 3.0, 2.2e-3])     # gamma
+    alpha_true = 0.35
+    F_true_fun = mixer_ordered(Fp, Fm, alpha=alpha_true)
+    F_true = F_true_fun(f)
+
+    # Add complex noise
+    rng = np.random.default_rng(0)
+    noise = (0.02*rng.standard_normal(f.size) + 1j*0.02*rng.standard_normal(f.size))
+    F_meas = F_true * (1 + noise)
+
+    # 1) Single-model choice
+    best_single = fit_ftf_with_model_choice(f, F_meas, candidate_ids=[0,1,2,3,4], n_starts_per_model=200)
+    print("[single] best:", best_single.name, "loss=", best_single.loss)
+
+    # 2) Ordered pilot→main combos (skip identical types)
+    combos = build_combo_registry(candidate_ids=[0,1,2,4], skip_identical=True, beta=1.0)
+    best_combo = fit_over_combos(f, F_meas, combos, n_starts_per_combo=200)
+    print("[combo ] best key:", best_combo.key, best_combo.name, "loss=", best_combo.loss)
+    for n, v in zip(best_combo.param_names, best_combo.params):
+        print(f"  {n} = {v:.6g}")
+
+    return {
+        "best_single": best_single,
+        "best_combo": best_combo,
+    }
+
 def main():
     """Main example function - runs Two-Delay Gamma FTF examples"""
     print("Two-Delay Gamma FTF Model Examples")
@@ -470,6 +511,9 @@ def main():
 
     print("\nRunning fuel-split example...")
     fs_info = run_fuel_split_example()
+
+    print("\nRunning toolbox synthetic demo...")
+    tb_info = run_toolbox_synthetic_demo()
     
     # Summary comparison
     print("\n\nSummary:")
@@ -492,6 +536,7 @@ def main():
     print(f"  - normalization_example.png")
     print(f"  - fuel_split_I_example.png")
     print(f"  - fuel_split_T22_example.png")
+    # Toolbox synthetic demo is console-only (no figures)
     
     # Show plots only when not running headless (e.g., Agg backend)
     if "agg" not in mpl.get_backend().lower():
