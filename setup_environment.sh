@@ -1,19 +1,20 @@
-#!/bin/bash
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cd "$(dirname "$0")"
 
-# Setup script for py-ta environment
 echo "Setting up Python environment for py-ta..."
 
-# Create virtual environment
-python3 -m venv venv
+# Create ./venv (idempotent)
+uv venv venv
 
-# Activate virtual environment
-source venv/bin/activate
-
-# Upgrade pip
-pip install --upgrade pip
-
-# Install required packages
-pip install -r requirements.txt
+# Install into *this* venv regardless of activation state
+uv pip install --python ./venv -r requirements.txt
 
 echo "Environment setup complete!"
-echo "To activate the environment, run: source venv/bin/activate"
+
+if command -v direnv >/dev/null 2>&1 && [ -f .envrc ]; then
+  echo "direnv detected. If first time, run: direnv allow"
+  echo "After that, entering this directory will auto-activate the venv."
+else
+  echo "To activate manually: source venv/bin/activate"
+fi

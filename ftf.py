@@ -816,6 +816,42 @@ def ftf_rational(num0: float = 0.1, num1: float = 0.0, den1: float = 1e-3, den2:
         return (num0 + num1*iw) / (1.0 + den1*iw + den2*iw**2)
     return F
 
+def ftf_n_tau_gauss_opposite(
+    n: float = 0.5, 
+    tau_conv: float = 3e-3, sigma_conv: float = 1e-3,
+    tau_turb: float = 2e-3, sigma_turb: float = 0.8e-3,
+    beta: float = 0.5
+) -> ComplexTF:
+    """
+    Two-pathway FTF with Gaussian-distributed delays and opposite signs.
+    
+    H(ω) = n[β E[e^{-iω τ_c}] + (1-β) E[e^{+iω τ_t}]]
+    
+    where τ_c ~ N(tau_conv, sigma_conv²), τ_t ~ N(tau_turb, sigma_turb²)
+    and E[e^{±iωτ}] = exp(±iωμ - 0.5(ωσ)²)
+    
+    Parameters
+    ----------
+    n : float
+        Overall amplitude
+    tau_conv : float
+        Mean convective delay [s] (negative contribution)
+    sigma_conv : float  
+        Std deviation of convective delay [s]
+    tau_turb : float
+        Mean turbulent delay [s] (positive contribution)
+    sigma_turb : float
+        Std deviation of turbulent delay [s]
+    beta : float
+        Weight of convective pathway (0 ≤ β ≤ 1)
+    """
+    def F(f: np.ndarray) -> np.ndarray:
+        ω = 2*np.pi*np.asarray(f, dtype=float)
+        conv = np.exp(-1j*ω*tau_conv - 0.5*(ω*sigma_conv)**2)
+        turb = np.exp(+1j*ω*tau_turb - 0.5*(ω*sigma_turb)**2)
+        return n * (beta*conv + (1.0-beta)*turb)
+    return F
+
 # -------- MISO pilot (velocity + phi with an upstream mixing TF) --------
 @dataclass
 class MISOParams:
@@ -903,6 +939,12 @@ REGISTRY: Dict[int, RegistryItem] = {
         ["w_ai","prop.n","prop.nu","prop.theta_c_s","prop.tau_s","ai.n","ai.nu","ai.theta_c_s","ai.tau_s"],
         np.array([0.00,  0.00,  0.5,   0.0003,  0.0,    0.00, 0.5,  0.0003,  0.0]),
         np.array([1.00,  2.00,  8.0,   0.0200,  0.050,  2.00, 8.0,  0.0200,  0.050])),
+    5: ("gauss_opposite", lambda p: ftf_n_tau_gauss_opposite(
+            n=p[0], tau_conv=p[1], sigma_conv=p[2], 
+            tau_turb=p[3], sigma_turb=p[4], beta=p[5]),
+        ["n","tau_conv_s","sigma_conv_s","tau_turb_s","sigma_turb_s","beta"],
+        np.array([0.00,  0.0005,  0.0001,  0.0005,  0.0001,  0.0]),
+        np.array([2.00,  0.0200,  0.0050,  0.0200,  0.0050,  1.0])),
 }
 
 ComboKey   = Tuple[int,int]

@@ -8,6 +8,65 @@ Full analysis with burner parameters:
 pythonresults = analyze_pattern_effectiveness(pattern, burner_params)
 The key insight is in the coupling strength calculation - A_m represents how much the pattern couples to azimuthal mode m. When A_m ≈ 0, that mode sees minimal forcing from the burner pattern.
 The find_optimal_pattern() function does brute force optimization to minimize coupling to a target mode, which is essentially what you've been doing manually in Excel.
+
+Fourier Analysis of Burner Patterns in Annular Combustors
+Key Physics
+Azimuthal combustion instabilities in annular gas turbines arise from coupling between acoustic modes and flame dynamics. The fundamental mechanism involves:
+
+Acoustic pressure oscillations traveling around the annular chamber
+Flame response to these oscillations via the flame transfer function (FTF): q'(t) = n·u'(t-τ)
+Energy feedback where heat release fluctuations can amplify or damp the acoustic mode
+
+Parmentier et al. (2012) developed a network model treating this as burners connected to an annular duct, leading to the dispersion relation det(∏Tᵢ - I) = 0. Under weak coupling assumptions, this reduces to a simple quadratic equation involving the sum of coupling factors.
+However, this summation approach ignores a critical physical reality: spatial phase relationships matter. A burner pattern's effectiveness depends not just on the total number of each burner type, but on how the pattern's spatial structure matches the acoustic mode shapes.
+Fourier Decomposition Approach
+Each burner pattern can be decomposed as:
+Pattern(θ) = ∑ₘ Aₘ e^(imθ)
+The key insight is that azimuthal mode m couples primarily to Fourier component Aₘ of the burner pattern. This captures the spatial coherence requirements that Parmentier's weak coupling analysis misses.
+For each mode m at frequency ωₘ = mπc₀/L, the coupling strength depends on:
+
+Aₘ: Spatial matching between pattern and mode shape
+Flame transfer function: n·e^(jωₘτ) evaluated at the mode frequency
+Pattern-mode phase relationship: Determines constructive vs destructive interference
+
+Interpretation Guide
+Azimuthal Modes
+
+Mode 0: Uniform (monopole) - affects all burners equally
+Mode 1: First azimuthal (~90 Hz for your geometry) - single pressure variation around circumference
+Mode 2: Second azimuthal (~180 Hz) - two pressure nodes/antinodes around circumference
+Mode m: m pressure nodes/antinodes, frequency = m×90 Hz
+
+Output Parameters
+Coupling Strength: Magnitude |Aₘ|
+
+> 1.0: Strong coupling - pattern efficiently drives this mode
+0.1-1.0: Moderate coupling - some interaction possible
+< 0.1: Weak coupling - pattern poorly matches this mode
+≈ 0: Minimal coupling - pattern has nodes at same locations as acoustic mode
+
+Phase: ∠Aₘ
+
+0 to π/2: Pattern leads acoustic mode - potential for instability amplification
+π/2 to π: Pattern lags acoustic mode - potential for damping
+Phase relationships between different burner types create interference effects
+
+Physical Meaning
+For your N=15 system:
+
+Mode frequencies: 90, 180, 270, 360, 450 Hz for modes 1-5
+Pattern [1,1,2]×5: Strong coupling expected for modes 5,10,15 (multiples of 5)
+Pattern [1,1,2,1,2,1,2,2,1,1,1,1,2,1,1]: More distributed coupling across different modes
+
+Practical Application
+Use this analysis to:
+
+Identify vulnerable modes: High coupling strength indicates modes likely to be unstable
+Design control patterns: Place burners to minimize coupling to problematic modes
+Validate simplified models: Compare Fourier predictions with Parmentier's summation approach
+Optimize burner placement: Find patterns that preferentially damp target modes while maintaining combustion performance
+
+The Fourier approach reveals why geometric considerations often dominate over simple burner counting in real combustor design.
 """
 
 import numpy as np
@@ -116,14 +175,14 @@ def analyze_pattern_effectiveness(pattern, burner_params, chamber_params):
     
     return results
 
-def compare_patterns(patterns, labels, burner_params):
+def compare_patterns(patterns, labels, burner_params, chamber_params):
     """
     Compare multiple patterns
     """
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
     
     for pattern, label in zip(patterns, labels):
-        results = analyze_pattern_effectiveness(pattern, burner_params)
+        results = analyze_pattern_effectiveness(pattern, burner_params, chamber_params)
         
         modes = list(results.keys())
         magnitudes = [results[m]['magnitude'] for m in modes]
@@ -175,9 +234,9 @@ def find_optimal_pattern(N, n_type2_burners, burner_params, target_mode):
 
 # Example usage
 if __name__ == "__main__":
-    # Your 20-burner patterns
-    pattern_symmetric = [1,1,1,2] * 5
-    pattern_nonsymmetric = [1,1,1,2, 1,2,1,1, 2,2,1,1, 1,1,1,1, 1,2,1,1]
+    # N = 15 burners patterns
+    pattern_symmetric = [1,1,2] * 5
+    pattern_nonsymmetric = [1,1,2, 1,2,1, 2,2,1, 1,1,1, 1,2,1]
     
     # Chamber parameters (from Parmentier's Table 1)
     chamber_params = {
@@ -214,7 +273,7 @@ if __name__ == "__main__":
     
     # Compare visually
     fig = compare_patterns([pattern_symmetric, pattern_nonsymmetric], 
-                          ['Symmetric 1112x5', 'Non-symmetric'], 
+                          ['Symmetric 112x5', 'Non-symmetric'], 
                           burner_params, chamber_params)
     plt.show()
 
