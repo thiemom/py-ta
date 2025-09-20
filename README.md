@@ -1,55 +1,80 @@
 # py-ta
 
-A Python package for Two-Delay Gamma Flame Transfer Function (FTF) modeling and parameter fitting.
+A comprehensive Python toolkit for Flame Transfer Function (FTF) modeling, combustion instability analysis, and burner pattern optimization.
 
 ## Overview
 
-This package implements the Two-Delay Gamma FTF model for combustion dynamics analysis. The model captures flame response as a superposition of two physical pathways (equivalence ratio and turbulence) using Gamma-distributed delay kernels, making it suitable for complex FTF data with interference patterns and phase jumps.
+This package provides both specialized Two-Delay Gamma FTF modeling and a general FTF toolbox with multiple model families, registry-based fitting, and advanced utilities for combustion instability analysis. It includes tools for burner pattern analysis in annular combustors and entropy loop modeling for thermoacoustic systems.
 
 ## Contents
 
-- **`ftf.py`** - Two-Delay Gamma FTF model implementation with parameter fitting and grid search capabilities
-- **`ftf_demo.py`** - Comprehensive examples demonstrating model usage with synthetic data generation, fitting, and visualization
-  - Includes a fuel-split pilot/main blending demo with I(ω) and T22(ω) sweeps
-- **`FTF_fits_references.md`** - Technical reference documentation with equations and usage guidelines
- - **`entropy_loop.py`** - Breathing-mode loop with OU forcing, LBO gate, entropy pockets, and Bake-style conversion (analytic PSD + helpers)
- - **`entropy_loop_demo.py`** - Demo script for the entropy loop (PSD and time-trace synthesis)
+### **Core FTF Modeling**
+- **`ftf.py`** - Comprehensive FTF modeling toolkit with dual functionality:
+  - **Two-Delay Gamma Specialist**: Advanced fitting for two-pathway DTL model
+  - **General FTF Toolbox**: 6 model families with registry-based fitting
+- **`ftf_demo.py`** - Complete examples including toolbox synthetic demos
 
-## Usage
+### **Combustor Analysis** 
+- **`fourier_patterns.py`** - Burner pattern analysis for annular combustors using Fourier decomposition
+- **`entropy_loop.py`** - Breathing-mode loop with OU forcing, LBO gate, entropy pockets
+- **`entropy_loop_demo.py`** - Demo script for entropy loop (PSD and time-trace synthesis)
 
-1. Set up the Python environment:
-   ```bash
-   ./setup_environment.sh
-   ```
+### **Documentation**
+- **`FTF_fits_references.md`** - Technical reference with equations and usage guidelines
+- **`setup_environment.sh`** - Environment setup with direnv support
 
-2. Activate the virtual environment:
-   ```bash
-   source venv/bin/activate
-   ```
+## Quick Start
 
-3. Run the example:
-    ```bash
-    python ftf_demo.py
-    ```
+### **Environment Setup**
+```bash
+# Setup environment (creates local venv and installs dependencies)
+./setup_environment.sh
 
-4. Run the entropy loop demo:
-   ```bash
-   python entropy_loop_demo.py
-   ```
+# Option 1: Use direnv for automatic activation (recommended)
+direnv allow
+
+# Option 2: Manual activation
+source venv/bin/activate
+```
+
+### **Run Examples**
+```bash
+# FTF modeling examples (Two-Delay Gamma + Toolbox)
+python ftf_demo.py
+
+# Burner pattern analysis
+python fourier_patterns.py
+
+# Entropy loop demo
+python entropy_loop_demo.py
+```
 
 ## Features
 
-- **Two-Delay Gamma Model**: Implements the physically-motivated two-pathway FTF model with Gamma-distributed delays
-- **Parameter Fitting**: Robust least-squares fitting with multi-start optimization and regularization
-- **Grid Search**: Automated search over shape parameters (m_φ, m_t) to find optimal model configuration
-- **T22 Normalization**: Reliable handling of T22 data using temperature ratio T2/T1 with automatic I-domain conversion
-- **Multi-Start Optimization**: Avoids local minima through multiple random initializations
-- **Comprehensive Examples**: Multiple usage scenarios with synthetic data generation and visualization
- - **Fuel-Split Blending**: Mix pilot and main stages via a logistic split with optional alignment/cross-term
+### **FTF Modeling Capabilities**
+- **Two-Delay Gamma Specialist**: Advanced two-pathway DTL model with robust fitting
+- **General FTF Toolbox**: 6 model families (diffusion, gamma, dispersion, rational, autoignition, gauss-opposite)
+- **Registry-Based Fitting**: Single model selection and pilot→main combinations
+- **Multi-Start Optimization**: Robust parameter estimation avoiding local minima
+- **Grid Search**: Automated shape parameter optimization (m_φ, m_t)
+- **T22 Normalization**: Reliable handling with temperature ratio T2/T1
 
-## Model Equation
+### **Combustor Analysis Tools**
+- **Burner Pattern Analysis**: Fourier decomposition for annular combustor patterns
+- **Spatial Coherence**: Mode coupling analysis for instability prediction
+- **Fuel-Split Modeling**: Multi-stage combustor blending with phase alignment
+- **Entropy Loop Modeling**: Thermoacoustic system dynamics with stochastic forcing
 
-The Two-Delay Gamma model represents the interaction index as:
+### **Advanced Features**
+- **Complex Loss Functions**: Magnitude + phase weighting for robust fitting
+- **Synthetic Data Generation**: Comprehensive test cases and validation
+- **Visualization**: Automated plot generation for all analysis types
+- **Development Environment**: Direnv integration for seamless workflow
+
+## FTF Model Families
+
+### **Two-Delay Gamma (Specialist)**
+The core two-pathway model for combustion instability analysis:
 
 ```
 I(ω) = A_φ · G_φ(ω) − A_t · G_t(ω)
@@ -58,13 +83,22 @@ I(ω) = A_φ · G_φ(ω) − A_t · G_t(ω)
 where `G_i(ω) = exp(−iω(τ_i + θ_i)) · Γ(m_i) / (Γ(m_i) + (iωτ_i)^m_i)`
 
 **Parameters:**
-- `A_φ`, `A_t`: Pathway amplitudes (equivalence ratio and turbulence)
+- `A_φ`, `A_t`: Pathway amplitudes (equivalence ratio vs turbulence)
 - `τ_φ`, `τ_t`: Characteristic delay times [s]
 - `θ_φ`, `θ_t`: Additional phase delays [s]  
 - `m_φ`, `m_t`: Shape parameters controlling delay distribution width
 
-## Quick Start
+### **General Toolbox Models**
+- **Diffusion**: `n·e^{-iωτ}·(1 + iω/ωc)^{-order}` - Transport-limited response
+- **Gamma**: `n·(1 + iωθc)^{-ν}` - Lieuwen-style distributed delays
+- **Dispersion**: `n·e^{-iωτ}·exp(-(ω/ωd)^k)` - Parmentier mixing/dispersion
+- **Rational**: Low-order ARMA-like transfer functions
+- **Autoignition**: Zonal superposition (propagation + AI core)
+- **Gauss Opposite**: Two-pathway with Gaussian delays and opposite signs
 
+## API Examples
+
+### **Two-Delay Gamma Fitting**
 ```python
 from ftf import fit_two_delay_gamma, fit_two_delay_gamma_grid
 
@@ -92,6 +126,37 @@ best, results = fit_two_delay_gamma_grid(
 )
 ```
 
+### **General FTF Toolbox**
+```python
+from ftf import ftf_n_tau_gauss_opposite, fit_ftf_with_model_choice, REGISTRY
+
+# Direct model evaluation
+f = np.linspace(10, 1000, 500)  # Hz
+ftf_func = ftf_n_tau_gauss_opposite(n=0.8, tau_conv=4e-3, beta=0.6)
+H = ftf_func(f)
+
+# Registry-based model selection
+best = fit_ftf_with_model_choice(f, F_meas, candidate_ids=[0,1,2,3,4,5])
+
+# Pilot→main combo fitting
+from ftf import build_combo_registry, fit_over_combos
+combos = build_combo_registry([0,1,2,4,5])
+best_combo = fit_over_combos(f, F_meas, combos)
+```
+
+### **Burner Pattern Analysis**
+```python
+from fourier_patterns import analyze_pattern_effectiveness
+
+# Analyze N=15 burner pattern
+pattern = [1,1,2,1,2,1,2,2,1,1,1,1,2,1,1]  # burner types
+burner_params = {'n1': 0.8, 'n2': 1.2, 'tau1': 3e-3, 'tau2': 2e-3}
+chamber_params = {'R': 0.3, 'c0': 340, 'N': 15}
+
+results = analyze_pattern_effectiveness(pattern, burner_params, chamber_params)
+# Returns coupling strengths for azimuthal modes 1-5
+```
+
 ## Fuel-Split API
 
 Blend pilot and main two-delay stages into a mixed interaction index `I_mix(ω, α)` and project to T22.
@@ -117,57 +182,88 @@ T_ratio = 3.5
 T22 = T22_from_fuel_split(omega, alpha, pilot, main, T_ratio, cfg=cfg)
 ```
 
-Demo script section: `run_fuel_split_example()` in `ftf_demo.py` generates:
+## Generated Outputs
 
-- `fuel_split_I_example.png` (|I_mix| and phase sweeps over α)
-- `fuel_split_T22_example.png` (|T22| and phase sweeps over α)
+Running the demo scripts produces comprehensive analysis plots:
 
-Run the demo after activating the environment:
+### **FTF Demo (`ftf_demo.py`)**
+- `two_delay_gamma_fit_example.png` - Basic Two-Delay Gamma fitting
+- `normalization_example.png` - T22 normalization demonstration  
+- `fuel_split_I_example.png` - Fuel-split |I_mix| and phase sweeps
+- `fuel_split_T22_example.png` - Fuel-split |T22| projections
 
-```bash
-source venv/bin/activate
-python ftf_demo.py
+### **Burner Pattern Analysis (`fourier_patterns.py`)**
+- Console output with coupling strengths for azimuthal modes 1-5
+- Identifies vulnerable modes and optimal burner placement strategies
+
+### **Entropy Loop (`entropy_loop_demo.py`)**
+- Time-domain synthesis with stochastic forcing
+- Power spectral density analysis and validation
+
+## Advanced Configuration
+
+### **Warning Suppression**
+```python
+# Suppress NumPy/SciPy warnings during optimization
+params, info = fit_two_delay_gamma(
+    omega, magnitude, phase,
+    suppress_warnings=True  # Default: False
+)
 ```
 
-## Silencing runtime warnings
-
-During optimization, NumPy/SciPy may emit runtime warnings (overflow, divide-by-zero, invalid operations). You can silence these per-call by setting `suppress_warnings=True`.
-
-Default: `suppress_warnings=False` (warnings shown).
-
+### **Custom Model Registration**
 ```python
-# Suppress warnings in a single fit
-params, info = fit_two_delay_gamma(
-    omega, magnitude, phase,
-    m_phi=2, m_t=3,
-    suppress_warnings=True
-)
+# Add custom FTF model to registry
+def my_custom_ftf(n, tau, custom_param):
+    def F(f):
+        return n * np.exp(-1j*2*np.pi*f*tau) * custom_param
+    return F
 
-# Suppress warnings in grid search
-best, results = fit_two_delay_gamma_grid(
-    omega, magnitude, phase,
-    mphi_list=range(1, 6), mt_list=range(1, 6),
-    selection="rmse",
-    suppress_warnings=True
-)
-
-# With normalization
-params, info = fit_two_delay_gamma(
-    omega, T22_mag, T22_phase,
-    m_phi=2, m_t=3,
-    normalize=True, T_ratio=3.5,
-    suppress_warnings=True
-)
+# Register for use with fitting utilities
+REGISTRY[6] = ("custom_model", 
+               lambda p: my_custom_ftf(p[0], p[1], p[2]),
+               ["n", "tau_s", "custom_param"],
+               np.array([0.0, 0.001, 0.5]),  # lower bounds
+               np.array([2.0, 0.050, 2.0]))  # upper bounds
 ```
 
 ## Dependencies
 
-- numpy
-- pandas  
-- matplotlib
-- scipy
+Core scientific computing stack:
+- **numpy** - Numerical computing and array operations
+- **scipy** - Optimization and scientific functions  
+- **matplotlib** - Plotting and visualization
+- **pandas** - Data manipulation (for entropy loop analysis)
 
-All dependencies are listed in `requirements.txt` and installed automatically by the setup script.
+All dependencies are listed in `requirements.txt` and installed automatically by `setup_environment.sh`.
+
+## Development Environment
+
+The project supports modern Python development workflows:
+
+- **Environment Management**: Local `venv` with `uv` for fast package installation
+- **Direnv Integration**: Automatic environment activation when entering project directory
+- **Git Integration**: Clean `.gitignore` for development artifacts
+- **Cross-Platform**: Works on macOS, Linux, and Windows
+
+## Project Structure
+
+```
+py-ta/
+├── ftf.py                    # Core FTF modeling toolkit
+├── ftf_demo.py              # Comprehensive examples
+├── fourier_patterns.py      # Burner pattern analysis
+├── entropy_loop.py          # Thermoacoustic dynamics
+├── entropy_loop_demo.py     # Entropy loop examples
+├── requirements.txt         # Python dependencies
+├── setup_environment.sh     # Environment setup script
+├── .envrc                   # Direnv configuration (local)
+└── FTF_fits_references.md   # Technical documentation
+```
+
+## Contributing
+
+This toolkit is designed for combustion instability research and industrial applications. The modular design allows easy extension with new FTF models, fitting algorithms, and analysis tools.
 
 ## License
 
