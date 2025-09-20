@@ -1,66 +1,99 @@
 # -*- coding: utf-8 -*-
 r"""
-ftf.py — Two-Delay Gamma Flame Transfer Function (FTF) model and fitting
+ftf.py — Flame Transfer Function (FTF) modeling and fitting toolkit
 
-This module implements the Two-Delay Gamma FTF model and provides robust
-fitting utilities, including grid search over shape parameters and optional
-normalization for T22 data.
+This module provides both specialized Two-Delay Gamma FTF modeling and a general
+FTF toolbox with multiple model families, registry-based fitting, and advanced
+utilities for combustion instability analysis.
+
+Two Main Components
+===================
+
+1. **Two-Delay Gamma Specialist**: Advanced fitting for the two-pathway DTL model
+2. **General FTF Toolbox**: Multiple model families with registry-based fitting
 
 Two-Delay Gamma FTF Model
--------------------------
-Unicode/plain equations:
+--------------------------
+The core specialist model for combustion instability analysis:
+
     I(ω) = A_φ · G_φ(ω) − A_t · G_t(ω)
-where
-    G_i(ω) = exp(−i ω (τ_i + θ_i)) · Γ(m_i) / (Γ(m_i) + (i ω τ_i)^{m_i})
 
-LaTeX form:
-    I(\omega) = A_\phi\,G_\phi(\omega) - A_t\,G_t(\omega),\quad
-    G_i(\omega) = e^{-i\omega(\tau_i+\theta_i)}\,\frac{\Gamma(m_i)}{\Gamma(m_i) + (i\omega\tau_i)^{m_i}}
+where G_i(ω) = exp(−iω(τ_i + θ_i)) · Γ(m_i) / (Γ(m_i) + (iωτ_i)^{m_i})
 
-Meaning
--------
-- A_φ, A_t: pathway amplitudes (equivalence ratio and turbulence)
-- τ_φ, τ_t: characteristic delays [s]
+**Physical Interpretation:**
+- A_φ, A_t: pathway amplitudes (equivalence ratio vs turbulence)
+- τ_φ, τ_t: characteristic delays [s] 
 - θ_φ, θ_t: additional phase delays [s]
 - m_φ, m_t: integer shape parameters (delay distribution width)
 - Positive ER pathway, negative turbulence pathway → interference patterns
 
-Features
---------
-- Superposition of two physical mechanisms (ER and turbulence)
-- Gamma-distributed delay kernels per pathway (distributed-delay/DTL)
-- Captures interference, magnitude nulls, and phase jumps
-- Independent delay distribution parameters per pathway
-- Shape parameters control distribution width (higher m → narrower)
-
-Data normalization
-------------------
-This module supports both domains:
-- Direct I(ω) fitting (interaction index domain)
+**Key Features:**
+- Robust fitting with multi-start optimization
+- Grid search over shape parameters (m_φ, m_t)
 - T22 normalization: I(ω) = (T22(ω) − 1) / (T2/T1 − 1)
+- I-domain workaround for numerical stability
+- Fuel-split extensions for multi-stage combustors
 
-Historical context (very brief)
--------------------------------
-- Crocco & Cheng (system-theory view; zeros/poles)
-- Dowling (thermoacoustic ZPK transfer functions)
-- Schuermans & Polifke (industrial low‑order flame models, DTL)
-- Lieuwen, Noiray, Polifke (robust ID, stochastic links, modern reviews)
+General FTF Toolbox
+--------------------
+Registry-based system with multiple model families:
 
-Key references
---------------
-- Lieuwen, T. (2012). Unsteady Combustor Physics. CUP. (distributed delays, two-pathway)
-- Schuller, T., Durox, D., Candel, S. (2003). Combustion and Flame. (laminar FTF model)
-- Noiray, N., Schuermans, B. (2013). IJNLM. (noise-driven Hopf metrics)
-- Polifke, W. (2020). Prog. Energy Combust. Sci. (FTF/FDF/DTL system ID)
-- Schuller, T., Noiray, N., Poinsot, T., Candel, S. (2020). J. Fluid Mech. (overview & normalization)
+**Available Models:**
+- **Diffusion**: n·e^{-iωτ}·(1 + iω/ωc)^{-order}
+- **Gamma**: n·(1 + iωθc)^{-ν} (Lieuwen-style)
+- **Dispersion**: n·e^{-iωτ}·exp(-(ω/ωd)^k) (Parmentier-style)
+- **Rational**: Low-order ARMA-like transfer functions
+- **Autoignition**: Zonal superposition (propagation + AI core)
+- **Gauss Opposite**: Two-pathway with Gaussian delays and opposite signs
+- **MISO Pilot**: Multi-input (velocity + φ) with upstream mixing
 
-Usage
------
-See fit utilities in this module:
-- fit_two_delay_gamma(omega, mag, phase, ...)
-- fit_two_delay_gamma_grid(omega, mag, phase, ...)
+**Fitting Capabilities:**
+- Single model selection from registry
+- Ordered pilot→main combinations with fuel split
+- Multi-start optimization for robustness
+- Complex loss functions (magnitude + phase weighting)
 
-For a complete example, run ftf_demo.py.
+Quick Start Examples
+====================
+
+**Two-Delay Gamma Fitting:**
+```python
+import numpy as np
+from ftf import *
+
+# Fit with grid search over shape parameters
+omega = np.logspace(0, 3, 100)  # rad/s
+best, results = fit_two_delay_gamma_grid(
+    omega, mag, phase,
+    mphi_list=range(1, 6), mt_list=range(1, 6),
+    normalize=True, T_ratio=3.5  # For T22 data
+)
+```
+
+**Toolbox Model Usage:**
+```python
+# Direct model evaluation
+f = np.linspace(10, 1000, 500)  # Hz
+ftf_func = ftf_gauss_opposite(n=0.8, tau_conv=4e-3, beta=0.6)
+H = ftf_func(f)
+
+# Registry-based fitting
+best = fit_ftf_with_model_choice(f, F_meas, candidate_ids=[0,1,2,3,4,5])
+
+# Combo fitting (pilot + main)
+combos = build_combo_registry([0,1,2,4,5])
+best_combo = fit_over_combos(f, F_meas, combos)
+```
+
+References
+==========
+- Lieuwen, T. (2012). Unsteady Combustor Physics. CUP.
+- Polifke, W. (2020). Prog. Energy Combust. Sci. 79.
+- Schuller, T., Noiray, N., Poinsot, T., Candel, S. (2020). J. Fluid Mech. 894.
+- Schuermans, B., Bellucci, V., Paschereit, C.O. (2004). Combust. Sci. Tech. 176.
+- Noiray, N., Schuermans, B. (2013). Int. J. Non-Linear Mech. 50.
+
+For complete examples, run ftf_demo.py.
 """
 import numpy as np
 from dataclasses import dataclass
@@ -69,34 +102,21 @@ from scipy.optimize import least_squares
 import warnings
 from contextlib import contextmanager
 
-# Two-delay Gamma (DTL) model that:
-# 	• Uses integer Gamma shapes m_phi, m_t in N (cascades of first-order lags)
-# 	• Re-parameterizes the turbulence delay via a ratio r_tau = tau_t/tau_phi 
-# 	  (so tau_t = r_tau * tau_phi), initialized slightly less than 1
-# 	• Lets you fit in your preferred domain:
-# 	  - default: data are (T2/T1-1) * I(omega) (i.e., T22-1) → no normalization needed
-# 	  - normalize=True: pass T2/T1 and the fitter divides by (T2/T1-1) to fit I(omega)
-# 	• Uses log-magnitude + wrapped-phase residuals with robust loss
+# ==================== CONSTANTS AND CONFIGURATION ====================
 
-# Model equation:
-# I(omega) = A_phi * exp(-i*omega*tau_phi) * (1 + i*omega*theta_phi)^(-m_phi)
-#          - A_t * exp(-i*omega*tau_t) * (1 + i*omega*theta_t)^(-m_t)
-# where tau_t = r_tau * tau_phi, with r_tau in (0,1)
+# Model constants
+DEFAULT_R_MIN = 0.4
+DEFAULT_R0 = 0.9
+LOW_FREQ_FRACTION = 0.15
+MIN_MAGNITUDE_CLIP = 1e-8
 
-# If normalize=True, the script converts T22 data to I domain:
-# I_meas = (T22 - 1) / (T2/T1 - 1)
-# Then fits I directly, which avoids numerical issues in the T22 domain.
+# Fitting constants  
+DEFAULT_MAX_NFEV = 50000
+DEFAULT_N_STARTS = 5
+DEFAULT_ROBUST_LOSS = "soft_l1"
+DEFAULT_F_SCALE = 1.0
 
-
-# References 
-# 	•	Lieuwen, T. Unsteady Combustor Physics, CUP, 2012 — two-pathway decomposition; distributed-delay kernels.
-# 	•	Polifke, W. “System identification of combustion dynamics… FTF, FDF and DTL,” Prog. Energy Combust. Sci. 79 (2020) — DTL/Gamma fits & rationale.
-# 	•	Schuermans, B.; Bellucci, V.; Paschereit, C.O. “Thermoacoustic modeling and control of a full-scale gas turbine combustor,” Combust. Sci. Tech. 176 (2004) — low-order flame models in practice.
-# 	•	Noiray, N.; Schuermans, B. “Deterministic quantities characterizing noise-driven Hopf bifurcations…,” Int. J. Non-Linear Mech. 50 (2013) — links between linear FTF and limit-cycle parameters.
-# 	•	Schuller, T.; Noiray, N.; Poinsot, T.; Candel, S. “Dynamics of premixed flames and combustion instabilities,” J. Fluid Mech. 894 (2020) — overview & normalization.
-
-
-# ----------------------- Model -----------------------
+# ==================== CORE TWO-DELAY GAMMA MODEL ====================
 def G_int(omega: np.ndarray, m: int, theta: float, tau: float) -> np.ndarray:
     """Integer-shape Gamma/DTL kernel: exp(-i*omega*tau) * (1 + i*omega*theta)^(-m)."""
     return np.exp(-1j*omega*tau) * (1.0 + 1j*omega*theta)**(-m)
@@ -162,27 +182,35 @@ def compute_ftf(omega: np.ndarray, params: TwoDelayParams, m_phi: int = 2, m_t: 
     """
     return I_two_delay(omega, params, m_phi, m_t)
 
-# ----------------------- Utils -----------------------
-def unwrap_phase(phi, deg=False):
+# ==================== UTILITY FUNCTIONS ====================
+def unwrap_phase(phi: np.ndarray, deg: bool = False) -> np.ndarray:
+    """Unwrap phase array, optionally converting from degrees."""
     phi = np.asarray(phi, float)
     if deg: phi = np.deg2rad(phi)
     return np.unwrap(phi)
 
-def wrap_pi(x):
+def wrap_pi(x: np.ndarray) -> np.ndarray:
+    """Wrap angle to [-π, π] interval."""
     return (x + np.pi) % (2*np.pi) - np.pi
 
-def softplus(x): return np.log1p(np.exp(x))
-def inv_softplus(y):
+def softplus(x: np.ndarray) -> np.ndarray: 
+    """Softplus function: log(1 + exp(x))."""
+    return np.log1p(np.exp(x))
+
+def inv_softplus(y: np.ndarray) -> np.ndarray:
     y = np.asarray(y, float)
     return np.log(np.expm1(np.maximum(y, 1e-12)))
 
-def s2unit_interval(x):   # R -> (0,1)
+def s2unit_interval(x: np.ndarray) -> np.ndarray:   
+    """Map R -> (0,1) via sigmoid."""
     return 1.0/(1.0 + np.exp(-x))
-def unit_interval2s(u):   # (0,1) -> R
+
+def unit_interval2s(u: np.ndarray) -> np.ndarray:   
+    """Map (0,1) -> R via logit."""
     u = np.clip(u, 1e-6, 1-1e-6)
     return np.log(u/(1.0-u))
 
-def magphase_to_complex(mag, phase, phase_in_degrees=False):
+def magphase_to_complex(mag: np.ndarray, phase: np.ndarray, phase_in_degrees: bool = False) -> np.ndarray:
     phi = unwrap_phase(phase, deg=phase_in_degrees)
     return np.asarray(mag, float) * np.exp(1j*phi)
 
@@ -195,7 +223,7 @@ def as_weight_array(w, n: int) -> np.ndarray:
         raise ValueError("Weight length must match data length or be scalar.")
     return w.astype(float)
 
-# -------------------- Warning suppression -------------------
+# ==================== WARNING SUPPRESSION ====================
 @contextmanager
 def _maybe_suppress_warnings(enabled: bool):
     """
@@ -216,10 +244,10 @@ def _maybe_suppress_warnings(enabled: bool):
                 pass
             yield
 
-# -------------------- Initialization -------------------
+# ==================== PARAMETER INITIALIZATION ====================
 def init_two_delay(omega, M_use, phi_unw, m_phi: int, m_t: int) -> TwoDelayParams:
-    nlo = max(3, int(0.15*len(omega)))
-    S0  = float(np.median(np.clip(M_use[:nlo], 1e-8, None)))
+    nlo = max(3, int(LOW_FREQ_FRACTION*len(omega)))
+    S0  = float(np.median(np.clip(M_use[:nlo], MIN_MAGNITUDE_CLIP, None)))
     # bulk delay from low-f phase slope
     A = np.vstack([omega[:nlo], np.ones(nlo)]).T
     slope, _ = np.linalg.lstsq(A, phi_unw[:nlo], rcond=None)[0]
@@ -238,8 +266,8 @@ def init_two_delay(omega, M_use, phi_unw, m_phi: int, m_t: int) -> TwoDelayParam
         theta_phi=theta_phi0, theta_t=theta_t0
     )
 
-# ---------------------- Fitting ------------------------
-def pack_uncon(p: TwoDelayParams, r_min=0.4) -> np.ndarray:
+# ==================== TWO-DELAY GAMMA FITTING ====================
+def pack_uncon(p: TwoDelayParams, r_min=DEFAULT_R_MIN) -> np.ndarray:
     u = (p.r_tau - r_min)/(1.0 - r_min)  # map (r_min,1)->(0,1)
     v = [
         inv_softplus(p.A_phi), inv_softplus(p.A_t),
@@ -249,7 +277,7 @@ def pack_uncon(p: TwoDelayParams, r_min=0.4) -> np.ndarray:
     ]
     return np.array(v, float)
 
-def unpack_uncon(v: np.ndarray, r_min=0.4) -> TwoDelayParams:
+def unpack_uncon(v: np.ndarray, r_min=DEFAULT_R_MIN) -> TwoDelayParams:
     v = np.asarray(v, float).ravel()
     i=0
     A_phi   = softplus(v[i]); i+=1
@@ -388,10 +416,10 @@ def fit_two_delay_gamma(omega, mag, phase, *,
                         m_phi: int = 2, m_t: int = 2,
                         normalize: bool = False, T_ratio=None,
                         w_mag: float = 1.0, w_phase: float = 1.0,
-                        r_min: float = 0.5, r0: float = 0.9, lambda_r: float = 5e-3,
-                        robust: Optional[str] = "soft_l1", f_scale: float = 1.0,
-                        max_nfev: int = 50000,
-                        multi_start: bool = True, n_starts: int = 5,
+                        r_min: float = DEFAULT_R_MIN, r0: float = DEFAULT_R0, lambda_r: float = 5e-3,
+                        robust: Optional[str] = DEFAULT_ROBUST_LOSS, f_scale: float = DEFAULT_F_SCALE,
+                        max_nfev: int = DEFAULT_MAX_NFEV,
+                        multi_start: bool = True, n_starts: int = DEFAULT_N_STARTS,
                         use_complex_residual: bool = False,
                         use_I_domain_workaround: bool = True,
                         suppress_warnings: bool = False) -> Tuple[TwoDelayParams, Dict]:
@@ -619,17 +647,17 @@ def fit_two_delay_gamma(omega, mag, phase, *,
 
     return p_hat, info
 
-# ---------------- Grid search over (m_phi, m_t) ----------------
+# ==================== GRID SEARCH OVER SHAPE PARAMETERS ====================
 def fit_two_delay_gamma_grid(omega, mag, phase, *,
                              phase_in_degrees=False,
                              mphi_list: Optional[Sequence[int]] = None,
                              mt_list: Optional[Sequence[int]] = None,
                              normalize: bool = False, T_ratio=None,
                              w_mag=1.0, w_phase=1.0,
-                             r_min=0.5, r0=0.9, lambda_r=1e-2,
-                             robust="soft_l1", f_scale=1.0,
+                             r_min=DEFAULT_R_MIN, r0=DEFAULT_R0, lambda_r=1e-2,
+                             robust=DEFAULT_ROBUST_LOSS, f_scale=DEFAULT_F_SCALE,
                              selection: str = "rmse",   # "rmse" or "aic"
-                             max_nfev=20000,
+                             max_nfev=DEFAULT_MAX_NFEV//2,
                              suppress_warnings: bool = False):
     """
     Try multiple integer shapes and pick the best by 'rmse' (default) or 'aic'.
@@ -674,7 +702,7 @@ def fit_two_delay_gamma_grid(omega, mag, phase, *,
 
     return best, results
 
-# ---------------- Convenience: make a callable ----------------
+# ==================== CONVENIENCE FUNCTIONS ====================
 def make_I_callable(p: TwoDelayParams, m_phi: int, m_t: int) -> Callable[[np.ndarray], np.ndarray]:
     return lambda omega: I_two_delay(np.asarray(omega, float), p, m_phi, m_t)
 
@@ -777,13 +805,12 @@ def T22_from_fuel_split(
     )
     return 1.0 + (float(T_ratio) - 1.0) * I_mix
 
-# ===================== FTF Toolbox (from ftf_patch.py) =====================
-# The following section integrates additional FTF models and simple fitting
-# utilities, while preserving the existing Two-Delay Gamma APIs above.
+# ==================== GENERAL FTF TOOLBOX ====================
+# Multiple model families with registry-based fitting and advanced utilities
 
 ComplexTF = Callable[[np.ndarray], np.ndarray]
 
-# -------------------------- FTF Library --------------------------
+# ==================== FTF MODEL LIBRARY ====================
 def ftf_diffusion(n: float = 0.12, tau: float = 6e-3, fc: float = 120.0, order: int = 1) -> ComplexTF:
     """Diffusion-like FTF: n * e^{-i ω τ} * (1 + i ω/ωc)^(-order)"""
     wc = 2*np.pi*fc
@@ -852,7 +879,7 @@ def ftf_n_tau_gauss_opposite(
         return n * (beta*conv + (1.0-beta)*turb)
     return F
 
-# -------- MISO pilot (velocity + phi with an upstream mixing TF) --------
+# ==================== MISO PILOT MODELS ====================
 @dataclass
 class MISOParams:
     # velocity-path (diffusion-like)
@@ -880,7 +907,7 @@ def evaluate_miso(f: np.ndarray, Fu: ComplexTF, Fphi: ComplexTF, Mix: ComplexTF,
     """Output = Fu*u' + Fphi*Mix*phi'."""
     return Fu(f)*u_hat + Fphi(f)*Mix(f)*phi_hat
 
-# ---------------------- Autoignition (zonal) ----------------------
+# ==================== AUTOIGNITION MODELS ====================
 def ftf_autoignition_zonal(
     w_ai: float = 0.25,
     n_prop: float = 0.5, nu_prop: float = 2.5, theta_prop: float = 2e-3, tau_prop: float = 0.0,
@@ -896,7 +923,7 @@ def ftf_autoignition_zonal(
         return (1.0 - w_ai)*F_prop(f) + w_ai*F_ai(f)
     return F
 
-# ------------------------- Ordered Mixer -------------------------
+# ==================== MIXING UTILITIES ====================
 def mixer_ordered(F_pilot: ComplexTF, F_main: ComplexTF, alpha: float, beta: float = 1.0, normalized: bool = True) -> ComplexTF:
     """
     Ordered blend pilot→main with fuel split alpha (main share). Returns callable F(f).
@@ -911,7 +938,7 @@ def mixer_ordered(F_pilot: ComplexTF, F_main: ComplexTF, alpha: float, beta: flo
         return w1*F_pilot(f) + w2*F_main(f)
     return F
 
-# -------------------------- Registries ---------------------------
+# ==================== MODEL REGISTRIES ====================
 ModelFactory = Callable[..., ComplexTF]
 RegistryItem = Tuple[str, Callable[[np.ndarray], np.ndarray], List[str], np.ndarray, np.ndarray]
 
@@ -980,9 +1007,10 @@ def build_combo_registry(candidate_ids: List[int], skip_identical: bool = True, 
                              pname, low, high)
     return combos
 
-# --------------------------- Fitting -----------------------------
+# ==================== TOOLBOX FITTING UTILITIES ====================
 def _unwrap_phase_ftf(z: np.ndarray) -> np.ndarray:
-    return np.unwrap(np.angle(z))
+    """Unwrap phase from complex array - alias for consistency with toolbox functions."""
+    return unwrap_phase(np.angle(z), deg=False)
 
 def loss_complex(Fm: np.ndarray, Fd: np.ndarray, w_mag: float = 1.0, w_ph: float = 1.0) -> float:
     if w_ph == 0.0:
