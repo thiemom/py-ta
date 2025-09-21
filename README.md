@@ -237,20 +237,11 @@ Core scientific computing stack:
 
 All dependencies are listed in `requirements.txt` and installed automatically by `setup_environment.sh`.
 
-## Development Environment
-
-The project supports modern Python development workflows:
-
-- **Environment Management**: Local `venv` with `uv` for fast package installation
-- **Direnv Integration**: Automatic environment activation when entering project directory
-- **Git Integration**: Clean `.gitignore` for development artifacts
-- **Cross-Platform**: Works on macOS, Linux, and Windows
-
 ## Project Structure
 
 ```
 py-ta/
-├── ftf.py                    # Core FTF modeling toolkit
+├── ftf.py                   # Core FTF modeling toolkit
 ├── ftf_demo.py              # Comprehensive examples
 ├── fourier_patterns.py      # Burner pattern analysis
 ├── entropy_loop.py          # Thermoacoustic dynamics
